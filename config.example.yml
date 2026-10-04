@@ -1,0 +1,47 @@
+# quietbar config. Copy to ~/.config/quietbar/config.yml (or point
+# QUIETBAR_CONFIG at it) and edit. Sections show in this order.
+
+# Folder the relative `path`s start from. Default: the folder quietbar is in.
+# dir: ~/SwiftBar/Plugins
+
+# timeout: 15            # seconds a plugin gets before it counts as "no answer"
+# icon: circle.grid.2x2  # SF Symbol shown when nothing is wrong
+# separator: ": "        # between the section name and its summary
+
+sections:
+  # Simplest form: the plugin's title text is the summary, and a title colour
+  # of red or orange/yellow raises an alert labelled with that title text.
+  - name: Disk
+    path: disk.5m.sh
+
+  # Custom summary from the title, plus an alert read from the menu body.
+  # The row becomes "Docker: 5 running · 2 unhealthy", and the menu bar shows
+  # "docker 2 unhealthy" until they are fixed.
+  - name: Docker
+    path: docker.1m.sh
+    summary:
+      - { title: '(\d+) running', text: '{1} running' }
+    alerts:
+      - body: '^Unhealthy \((?<n>\d+)\)'
+        level: critical
+        label: 'docker {n} unhealthy'
+        suffix: ' · {n} unhealthy'
+
+  # Alert on a word in the title, whatever colour it has.
+  - name: Deploys
+    path: deploys.5m.py
+    alerts:
+      - { title: 'FAILED', level: critical, label: deploy failed }
+
+  # Only a red title counts here, and a leading "●" is dropped from the text.
+  - name: VPN
+    path: vpn.10s.sh
+    title_strip: '\A●\s*'
+    alerts:
+      - { color: critical, label: vpn down }
+
+  # Slow plugin with its own timeout; never raises an alert.
+  - name: Calendar
+    path: next-event.1m.sh
+    timeout: 5
+    alerts: false
