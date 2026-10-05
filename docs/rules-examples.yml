@@ -1,8 +1,10 @@
-# quietbar config. Copy to ~/.config/quietbar/config.yml (or point
-# QUIETBAR_CONFIG at it) and edit. Sections show in this order.
+# Examples of quietbar rules, for plugins that don't exist. They show every
+# rule key at work; see README.md for what each means. The real config for the
+# bundled plugins is ../config.yml.
 
-# Folder the relative `path`s start from. Default: the folder quietbar is in.
-# dir: ~/SwiftBar/Plugins
+# Folder the relative `path`s start from. Default: the folder install.sh puts
+# the bundled plugins in.
+# dir: ~/SwiftBar/Plugins/.quietbar/modules
 
 # timeout: 15            # seconds a plugin gets before it counts as "no answer"
 # icon: circle.grid.2x2  # SF Symbol shown when nothing is wrong
@@ -45,3 +47,8 @@ sections:
     path: next-event.1m.sh
     timeout: 5
     alerts: false
+
+  # A plugin that may not be installed yet: `setup` is shown instead of "not found".
+  - name: Backup
+    path: backup.1h.sh
+    setup: 'Not installed. Copy backup.1h.sh next to the other plugins.'

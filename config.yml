@@ -1,0 +1,97 @@
+# quietbar config. install.sh copies this to ~/.config/quietbar/config.yml the
+# first time (never over an existing one). Sections show in this order. The rule
+# keys are explained in README.md; docs/rules-examples.yml has more examples.
+
+# Folder the relative `path`s start from. Default: the folder install.sh puts
+# the bundled plugins in (.quietbar/modules next to quietbar.1m.rb).
+# dir: ~/SwiftBar/Plugins/.quietbar/modules
+
+timeout: 15              # seconds a plugin gets before it counts as "no answer"
+icon: circle.grid.2x2    # SF Symbol shown when nothing is wrong
+separator: " — "         # between the section name and its summary
+
+# Settings the bundled plugins read from their environment. Everything listed
+# here is passed to every plugin; the values shown are the defaults.
+# env:
+#   QUIETBAR_PROJECTS_DIR: ~/git             # git-status scans it; ports and macstat shorten paths with it
+#   QUIETBAR_LABEL_PREFIX: local.quietbar    # launchd labels that count as yours (tasks, loadout, dev-processes)
+#   QUIETBAR_SIZE_PATHS: ~/.npm:~/.cache     # mac-health: folders whose size it reports (colon-separated)
+#   SUPERVISOR_CONF: /opt/homebrew/etc/supervisord.conf   # only when you use supervisor
+
+sections:
+  # Disk, memory, CPU, battery, Time Machine. The plugin colours its title amber
+  # or red and puts the worst reading in it ("106G", "18%", "bkp 9d"); that
+  # reading becomes the menu bar label.
+  - name: Mac
+    path: mac-health.1m.rb
+    title_strip: '\A◉\s*'
+    summary:
+      - { body: '(?<free>[\d.]+) GB free', text: '{free:round} GB free' }
+    alert_suffix: ' · {label}'
+    alerts:
+      - { title: '\A(?<size>\d+G)\z', label: 'disk {size}', suffix: '' }
+      - { title: '\A(?<pct>\d+%)\z', label: 'battery {pct}' }
+      - { title: '\Abkp (?<age>.*)', label: 'backup {age}' }
+      - {}
+
+  # Homebrew services. An "Error (N):" group lists services in the error state.
+  # A Mac without Homebrew just shows "no brew", without an alert.
+  # Fetched by install.sh, see README.md ("Third-party code").
+  - name: Services
+    path: brew-services.1m.rb
+    setup: 'Not installed. Run install.sh again with network access (it downloads the plugin).'
+    summary:
+      - { title: '⚠️', text: no brew }
+      - { title: '💡(\d+)', text: '{1} running' }
+    alerts:
+      - { body: '^Error \((?<n>[1-9]\d*)\):', level: critical, label: service error, suffix: ' · {n} error' }
+
+  # Listening TCP ports. No alert state of its own.
+  - name: Ports
+    path: ports.1m.rb
+    summary:
+      - { title: '⇄(\d+)', text: '{1} listening' }
+    alerts: false
+
+  # Scheduled tasks. The title gets "!" and turns red when a task failed or is
+  # overdue.
+  - name: Tasks
+    path: tasks.1m.rb
+    summary:
+      - { title: '⏱(?<soon>[1-9]\d*)', text: '{soon} due soon' }
+      - { text: all on time }
+    alerts:
+      - { title: '!', body: ['^Overdue / failed \((?<n>[1-9]\d*)\)', ' · exit '], level: critical, label: task failed, text: '{n} failed' }
+      - { title: '!', body: ' · exit ', level: critical, label: task failed, text: some failed }
+      - { title: '!', body: '^Overdue / failed \((?<n>[1-9]\d*)\)', level: critical, label: task overdue, text: '{n} overdue' }
+      - { title: '!', level: critical, label: task overdue, text: some overdue }
+
+  # Presets for what runs: services, launchd jobs, apps. A preset file problem
+  # shows as an orange "⚠" row. Presets live in ~/.config/quietbar/presets.yml.
+  - name: Loadout
+    path: loadout.1m.rb
+    title_strip: '\A◧\s*'
+    alerts:
+      - { body: '^⚠', level: warn, label: loadout problem }
+
+  # Claude plan usage (5-hour and weekly). Amber from 60%, red from 85%; only
+  # red raises an alert. Needs the status line set up, see README.md.
+  - name: Claude
+    path: claude-usage.1m.rb
+    summary:
+      - { title: '\A—\z', text: no reading }
+    alerts:
+      - { color: critical, title: '(?<pct>\d+)%', label: 'claude {pct:max}%' }
+
+  # Not in the default menu. Uncomment to add them.
+  #
+  # Dirty, unpushed and stashed repos under QUIETBAR_PROJECTS_DIR (every 5 minutes
+  # on its own; here it runs on each refresh, so give it room):
+  # - name: Git
+  #   path: git-status.5m.rb
+  #   timeout: 25
+  #
+  # Running dev processes (node first) and launchd jobs, with a stop button:
+  # - name: Dev
+  #   path: dev-processes.1m.rb
+  #   alerts: false
