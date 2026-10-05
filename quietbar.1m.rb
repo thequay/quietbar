@@ -11,9 +11,11 @@
 # becomes a summary row with its own menu one level down. The menu bar shows
 # an icon, plus the worst alert label (and "+N" for the rest) when something
 # needs attention. See README.md for the config format and the alert contract.
+# install.sh sets up the bundled plugins and a config that wraps them.
 
 require 'open3'
 require 'yaml'
+require 'zlib'
 
 Encoding.default_external = Encoding::UTF_8
 Thread.report_on_exception = false
@@ -133,7 +135,7 @@ end
 
 # SwiftBar keeps per-plugin data and cache dirs named after the plugin's path.
 # The wrapped plugin gets the dirs it would have had running on its own.
-def child_env(path)
+def child_env(path, extra = {})
   base = lambda do |var, default|
     own = ENV[var].to_s
     own.end_with?(SELF) ? own.delete_suffix(SELF) : default
@@ -146,14 +148,14 @@ def child_env(path)
     'LANG' => 'en_US.UTF-8',
     'PATH' => [ENV['PATH'], '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
               .compact.join(':')
-  }
+  }.merge(extra)
 end
 
 # [stdout lines, stderr lines, exited ok], or nil after the timeout. A plugin
 # past its timeout is killed together with its child processes.
-def run_plugin(path, timeout)
+def run_plugin(path, timeout, extra_env = {})
   out = err = ok = nil
-  Open3.popen3(child_env(path), path, pgroup: true) do |stdin, stdout, stderr, wait|
+  Open3.popen3(child_env(path, extra_env), path, pgroup: true) do |stdin, stdout, stderr, wait|
     stdin.close
     readers = [Thread.new { stdout.read }, Thread.new { stderr.read }]
     unless wait.join(timeout)
@@ -181,9 +183,14 @@ def collect(section, cfg)
   muted = ->(word) { [["#{name}#{sep}#{word} | color=\"#{MUTED}\""], nil] }
 
   path = File.expand_path(section['path'].to_s, cfg[:dir])
-  return muted.call('not found') unless File.file?(path)
+  unless File.file?(path)
+    # `setup` is the how-to shown when the plugin isn't there (yet).
+    return [["#{name}#{sep}not set up | color=\"#{MUTED}\"", "--#{section['setup']}"], nil] if section['setup']
 
-  result = run_plugin(path, section['timeout'] || cfg[:timeout]) or return muted.call('no answer')
+    return muted.call('not found')
+  end
+
+  result = run_plugin(path, section['timeout'] || cfg[:timeout], cfg[:env]) or return muted.call('no answer')
   lines, errors, ok = result
   split = lines.index { |l| l.strip == '---' }
   title = lines.first.to_s
@@ -226,8 +233,14 @@ end
 sections = Array(config['sections'])
 die "No sections in #{CONFIG}." if sections.empty?
 
+# Without `dir`, the plugins are looked for where install.sh puts them
+# (.quietbar/modules beside this file; SwiftBar skips folders that start with a
+# dot, so they don't show up as menu bar items of their own), then in modules/
+# (a checkout of the repo), then beside this file.
+default_dir = %w[.quietbar/modules modules].map { |d| File.join(__dir__, d) }.find { |d| File.directory?(d) } || __dir__
 cfg = {
-  dir: File.expand_path(config['dir'] || __dir__),
+  dir: File.expand_path(config['dir'] || default_dir),
+  env: (config['env'] || {}).map { |k, v| [k.to_s, v.to_s] }.to_h,
   timeout: config['timeout'] || 15,
   separator: config['separator'] || ': ',
   icon: config['icon'] || 'circle.grid.2x2'
@@ -245,7 +258,34 @@ else
   puts "| sfimage=#{cfg[:icon]}"
 end
 
+# SwiftBar 2.1.x (seen on 2.1.1) updates the open menu in place between runs.
+# It matches old and new rows by their first word (or text up to a colon) and
+# font. When a row with a submenu matches but its text changed ("Mac: 106 GB
+# free" -> "105 GB free"), it patches the row and clears its action, which
+# leaves the row grey with a dead submenu. Giving every submenu row a font
+# name derived from its own text makes a changed row look new, so SwiftBar
+# rebuilds it instead. No font has that name, so it renders in the normal
+# menu font. Rows that already set a font are left alone.
+SEPARATOR = /\A(--)*---\z/.freeze
+
+def depth(line)
+  line[/\A(?:--)*/].size / 2
+end
+
+def keep_submenus_live(lines)
+  lines.each_with_index.map do |line, i|
+    nxt = lines[i + 1]
+    next line if line =~ SEPARATOR || nxt.nil? || nxt =~ SEPARATOR || depth(nxt) <= depth(line)
+
+    params = line.split('|', 2)[1]
+    next line if params.to_s =~ /(\A|\s)font=/
+
+    tag = "font=\"row-#{format('%08x', Zlib.crc32(line))}\""
+    params ? "#{line.rstrip} #{tag}" : "#{line.rstrip} | #{tag}"
+  end
+end
+
 puts '---'
-results.each { |rows, _| rows.each { |row| puts row } }
+keep_submenus_live(results.flat_map { |rows, _| rows }).each { |row| puts row }
 puts '---'
 puts 'Refresh | refresh=true'
