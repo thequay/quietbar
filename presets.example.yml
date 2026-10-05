@@ -1,0 +1,41 @@
+# Loadout presets, applied from the Loadout menu (modules/loadout.1m.rb).
+# install.sh copies this file to ~/.config/quietbar/presets.yml the first time,
+# and never over an existing one. Edit that copy.
+#
+#   name:
+#     on:   things to start (if not already running)
+#     off:  things to stop (if running)
+#     open: macOS apps to open, by name (Safari, "Sequel Ace", ...)
+#     quit: macOS apps to quit
+#
+# Anything a preset does not mention is left alone. All four keys are optional.
+# Items under on/off are:
+#   - a name from `bin/svc.sh` (run it to see them): Homebrew services such as
+#     mysql or postgresql@18, and supervisor groups if you use supervisor.
+#     The start of a name works if it is unique.
+#   - a launchd agent by label, e.g. local.quietbar.backup (its plist is in
+#     ~/Library/LaunchAgents)
+# Stopping `supervisor` itself stops every program it runs; stop the groups instead.
+#
+# "Save current state as preset" in the menu appends a preset with the running
+# things as `on:`. Check a preset first with: loadout.1m.rb apply NAME --dry-run
+
+# Quiet desk: quit the chat and mail apps.
+focus:
+  quit:
+    - Mail
+    - Messages
+
+# The apps you start the day with.
+morning:
+  open:
+    - Safari
+    - Notes
+
+# Example with services, uncomment and change the names:
+# backend:
+#   on:
+#     - postgresql@18
+#     - redis
+#   off:
+#     - mysql

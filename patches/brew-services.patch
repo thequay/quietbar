@@ -1,0 +1,57 @@
+--- brew-services.10m.rb
++++ brew-services.1m.rb
+@@ -13,6 +13,13 @@
+ # <xbar.var>boolean(VAR_GROUPS=true): List services in started/stopped groups?</xbar.var>
+ # <xbar.var>string(VAR_BREW_PATH=""): Path to "brew" executable.</xbar.var>
+ # <xbar.var>string(VAR_HIDDEN_SERVICES=""): Comma-separated list of services to hide.</xbar.var>
++#
++# Local change (quietbar): Start All and Restart All only touch services that
++# are not hidden. Upstream runs `brew services start|restart --all`, which also
++# starts hidden ones (for example a service another tool already runs, whose
++# Homebrew copy would clash with it). The two buttons call start_visible and
++# restart_visible, defined next to the other RPC methods. Nothing else differs
++# from upstream.
+ 
+ # rubocop:disable Metrics/AbcSize
+ # rubocop:disable Metrics/BlockLength
+@@ -436,7 +443,7 @@
+             printer.item(
+               "Start All (#{visible.stopped.size} services)",
+               terminal: false, refresh: true,
+-              shell: [brew_path, 'services', 'start', '--all']
++              rpc: ['start_visible']
+             )
+           else
+             printer.item("Start All (#{visible.stopped.size} services)")
+@@ -455,7 +462,7 @@
+             printer.item(
+               "Restart All (#{count} services)",
+               terminal: false, refresh: true,
+-              shell: [brew_path, 'services', 'restart', '--all']
++              rpc: ['restart_visible']
+             )
+           else
+             printer.item("Restart All (#{visible.size} services)")
+@@ -477,6 +484,22 @@
+       end
+     end
+ 
++    def start_visible(*)
++      all_services.visible.stopped.each do |service|
++        cmd(brew_path, 'services', 'start', service.name)
++      rescue Xbar::CommandError
++        next
++      end
++    end
++
++    def restart_visible(*)
++      all_services.visible.each do |service|
++        cmd(brew_path, 'services', 'restart', service.name)
++      rescue Xbar::CommandError
++        next
++      end
++    end
++
+     def use_groups(*args)
+       config['VAR_GROUPS'] = truthy?(args.first)
+       config.save

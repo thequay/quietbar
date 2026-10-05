@@ -1,0 +1,5 @@
+#!/bin/bash
+# task: scheduled tasks. Same as the SwiftBar plugin (modules/tasks.1m.rb), as a command.
+# `task help` for usage.
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exec /usr/bin/ruby "$here/../modules/tasks.1m.rb" "${@:-list}"
