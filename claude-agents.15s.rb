@@ -479,14 +479,6 @@ def usage_tint(pct)
   GREEN
 end
 
-def left(seconds)
-  seconds = [seconds.to_i, 0].max
-  return "#{seconds / 86_400}d #{seconds % 86_400 / 3600}h" if seconds >= 86_400
-  return format('%dh %02dm', seconds / 3600, seconds % 3600 / 60) if seconds >= 3600
-
-  "#{seconds / 60}m"
-end
-
 # How long ago a reading is: 40m, 14h, 3d.
 def ago(seconds)
   seconds = [seconds.to_i, 0].max
@@ -542,7 +534,7 @@ def usage_rows(data, now)
     end
     color = stale ? MUTED : usage_tint(w[:pct])
     clock = w[:at].strftime(w[:at].to_date == now.to_date ? '%H:%M' : '%a %H:%M')
-    note = ["resets #{clock}", "in #{left(w[:at] - now)}", stale ? "as of #{ago(age)} ago" : nil].compact.join(' · ')
+    note = ["↻#{clock}", stale ? "as of #{ago(age)} ago" : nil].compact.join(' · ')
     rows << mono_row(usage_line(name, bar(w[:pct]), format('%d%%', w[:pct].round), note), color)
     next unless key == 'seven_day'
 
