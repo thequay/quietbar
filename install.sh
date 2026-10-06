@@ -59,9 +59,9 @@ else
 fi
 # The plugins call /usr/bin/python3, which on a Mac without the Command Line Tools is only a stub.
 if /usr/bin/xcode-select -p >/dev/null 2>&1 && [[ -x /usr/bin/python3 ]]; then
-  say "  python3   ok (the Mac and Claude rows use it)"
+  say "  python3   ok (the Mac row and the Claude usage recorder use it)"
 else
-  missing+=("python3: needs the Command Line Tools. Run 'xcode-select --install' for the Mac and Claude rows")
+  missing+=("python3: needs the Command Line Tools. Run 'xcode-select --install' for the Mac row and the Claude usage recorder")
 fi
 if command -v brew >/dev/null 2>&1 || [[ -x /opt/homebrew/bin/brew || -x /usr/local/bin/brew ]]; then
   say "  brew      ok"
@@ -109,7 +109,7 @@ put() {
 put "$here/quietbar.1m.rb" "$target/quietbar.1m.rb" 755
 [[ $agents == 1 ]] && put "$here/claude-agents.15s.rb" "$target/claude-agents.15s.rb" 755
 for f in "$here"/modules/*.rb; do put "$f" "$target/.quietbar/modules/$(basename "$f")" 755; done
-for f in "$here"/bin/*; do put "$f" "$target/.quietbar/bin/$(basename "$f")" 755; done
+for f in "$here"/bin/*; do if [[ -f $f ]]; then put "$f" "$target/.quietbar/bin/$(basename "$f")" 755; fi; done
 for f in "$here"/lib/*.rb; do put "$f" "$target/.quietbar/lib/$(basename "$f")" 644; done
 put "$here/presets.example.yml" "$target/.quietbar/presets.example.yml" 644
 put "$here/config.yml" "$target/.quietbar/config.example.yml" 644
@@ -188,14 +188,14 @@ fi
 
 say ""
 say "Next"
-say "  - Claude row: Claude Code has to tell quietbar its usage. Add this to ~/.claude/settings.json"
-say "    (nothing is edited for you):"
-say "      \"statusLine\": { \"type\": \"command\", \"command\": \"$target/.quietbar/bin/claude-usage.py --statusline\" }"
-say "    Until then the row says \"no reading\" and its menu repeats these steps."
 say "  - Settings live in $config_dir/config.yml (see README.md)."
 if [[ $agents == 1 ]]; then
-  say "  - Claude agents is its own menu bar item. Its first click on a session asks macOS for"
-  say "    permission to control your terminal (Terminal.app by default; iTerm2 is set in the config)."
+  say "  - The bar has two items: Mac (quietbar) and AI (Claude agents). A first click on an AI session asks"
+  say "    macOS for permission to control your terminal (Terminal.app by default; iTerm2 is set in the config)."
+  say "  - Claude plan usage, shown in the AI item: Claude Code has to report it. Add this to the settings.json"
+  say "    of every Claude profile you want usage for, e.g. ~/.claude/settings.json (nothing is edited for you):"
+  say "      \"statusLine\": { \"type\": \"command\", \"command\": \"$target/.quietbar/bin/claude-usage.py --statusline\" }"
+  say "    Until then a profile shows \"no usage data\"."
 fi
 
 if [[ ${#missing[@]} -gt 0 ]]; then

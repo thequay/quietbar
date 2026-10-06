@@ -1,7 +1,7 @@
 #!/usr/bin/python3
-"""claude-usage: Claude plan usage (5-hour and weekly) for the quietbar menu.
+"""claude-usage: records Claude plan usage (5-hour and weekly) for the Claude agents menu bar item.
 
-usage: claude-usage.py                 print the last reading, in the form modules/claude-usage.1m.rb reads
+usage: claude-usage.py                 print the last reading of every profile
        claude-usage.py --statusline    Claude Code status line: reads the session JSON on stdin,
                                        records the plan usage in the cache, prints "5h 6% · wk 13%"
 
@@ -11,45 +11,68 @@ Nothing calls an API, and no token or login is read. Set it up once in ~/.claude
 
   "statusLine": { "type": "command", "command": "/path/to/claude-usage.py --statusline" }
 
-Already have a status line command? Pipe the JSON through this script first, or call it from yours
-and ignore its output.
+Set it up in the settings.json of every Claude profile you want usage for (~/.claude/settings.json,
+~/.claude-work/settings.json, ...). Already have a status line command? Pipe the JSON through this
+script first, or call it from yours and ignore its output.
 
-Cache: ~/.cache/claude-usage/usage.json (CLAUDE_USAGE_CACHE moves it). Standard library only.
+Each profile gets its own reading, because each can be a different account. The profile is the
+folder the session's transcript is under, else CLAUDE_CONFIG_DIR, else ~/.claude. Cache:
+~/.cache/claude-usage/usage.json for ~/.claude, ~/.cache/claude-usage/profiles/<name>/usage.json for
+the others (CLAUDE_USAGE_CACHE moves it all). Each file records its profile folder as "config_dir".
+Standard library only.
 """
 
 import fcntl
+import glob
+import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import time
 
 CACHE = os.environ.get("CLAUDE_USAGE_CACHE") or os.path.join(os.path.expanduser("~"), ".cache", "claude-usage")
-USAGE = os.path.join(CACHE, "usage.json")
-LOCK = os.path.join(CACHE, ".usage.lock")
+DEFAULT_PROFILE = os.path.realpath(os.path.join(os.path.expanduser("~"), ".claude"))
 WINDOWS = {"five_hour": ("5h", 5 * 3600), "seven_day": ("week", 7 * 86400)}
 SAME_WINDOW = 600  # reset times this close belong to the same window
 STALE = 15 * 60    # readings older than this get an "as of" note
 BAR = 20
 
 
-def read_usage():
+def profile_dir(data):
+    """The Claude profile folder a status line call belongs to."""
+    m = re.match(r"(.+?)/projects/[^/]+/", (data.get("transcript_path") if isinstance(data, dict) else "") or "")
+    folder = m.group(1) if m else os.environ.get("CLAUDE_CONFIG_DIR") or DEFAULT_PROFILE
+    return os.path.realpath(os.path.expanduser(folder))
+
+
+def cache_dir_for(config_dir):
+    if config_dir == DEFAULT_PROFILE:
+        return CACHE
+    name = re.sub(r"[^A-Za-z0-9_.-]", "-", os.path.basename(config_dir).lstrip(".")) or "profile"
+    return os.path.join(CACHE, "profiles", f"{name}-{hashlib.sha1(config_dir.encode()).hexdigest()[:6]}")
+
+
+def read_usage(path):
     try:
-        with open(USAGE) as f:
+        with open(path) as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
-def merge(limits, now):
+def merge(limits, now, config_dir):
     """Fold one session's rate_limits into the shared reading. Within a window use only grows, so
     the higher number is the newer one; a later reset time is a newer window. That keeps an idle
     session's old numbers from overwriting a busy session's."""
-    os.makedirs(CACHE, exist_ok=True)
-    with open(LOCK, "w") as lock:
+    cache = cache_dir_for(config_dir)
+    usage_file = os.path.join(cache, "usage.json")
+    os.makedirs(cache, exist_ok=True)
+    with open(os.path.join(cache, ".usage.lock"), "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        usage = read_usage()
+        usage = read_usage(usage_file)
         changed = False
         for key in WINDOWS:
             new = (limits or {}).get(key) or {}
@@ -64,10 +87,11 @@ def merge(limits, now):
                 changed = True
         if changed:
             usage["seen_at"] = now
-            fd, tmp = tempfile.mkstemp(dir=CACHE, suffix=".tmp")
+            usage["config_dir"] = config_dir
+            fd, tmp = tempfile.mkstemp(dir=cache, suffix=".tmp")
             with os.fdopen(fd, "w") as f:
                 json.dump(usage, f, indent=1)
-            os.replace(tmp, USAGE)
+            os.replace(tmp, usage_file)
         return usage
 
 
@@ -102,26 +126,35 @@ def week_gone(w, now):
     return max(0.0, min(100.0, 100.0 * (now - (w["resets_at"] - length)) / length))
 
 
+def caches():
+    """Every recorded reading, the default profile's first."""
+    files = [os.path.join(CACHE, "usage.json")] + sorted(glob.glob(os.path.join(CACHE, "profiles", "*", "usage.json")))
+    return [(read_usage(f).get("config_dir") or DEFAULT_PROFILE, read_usage(f)) for f in files if os.path.exists(f)]
+
+
 def report(now):
-    usage = read_usage()
-    if not any(k in usage for k in WINDOWS):
+    readings = [(c, u) for c, u in caches() if any(k in u for k in WINDOWS)]
+    if not readings:
         script = os.path.realpath(__file__)
         print("No Claude usage recorded yet.")
-        print("Claude Code reports it to its status line. To record it, add this to ~/.claude/settings.json:")
+        print("Claude Code reports it to its status line. To record it, add this to the settings.json of each Claude profile:")
         print(f'"statusLine": {{ "type": "command", "command": "{script} --statusline" }}')
         print("The numbers appear after the next Claude response.")
         return
-    age = now - usage.get("seen_at", now)
-    print("CLAUDE USAGE  " + (f"as of {span(age)} ago" if age > STALE else "from the last Claude response"))
-    for key, (label, _) in WINDOWS.items():
-        w = window(usage, key, now)
-        if not w:
-            continue
-        filled = max(0, min(BAR, round(w["used"] / 100 * BAR)))
-        note = f"resets {when(w['resets_at'], now)}" if w["resets_at"] else "reset, nothing used since"
-        if key == "seven_day" and w["resets_at"]:
-            note += f" · {week_gone(w, now):.0f}% of week gone"
-        print(f"{label:<12}{'█' * filled}{'░' * (BAR - filled)} {w['used']:>3.0f}%  {note}")
+    for config_dir, usage in readings:
+        age = now - usage.get("seen_at", now)
+        home = os.path.expanduser("~")
+        shown = "~" + config_dir[len(home):] if config_dir.startswith(home + "/") else config_dir
+        print(f"CLAUDE USAGE {shown}  " + (f"as of {span(age)} ago" if age > STALE else "from the last Claude response"))
+        for key, (label, _) in WINDOWS.items():
+            w = window(usage, key, now)
+            if not w:
+                continue
+            filled = max(0, min(BAR, round(w["used"] / 100 * BAR)))
+            note = f"resets {when(w['resets_at'], now)}" if w["resets_at"] else "reset, nothing used since"
+            if key == "seven_day" and w["resets_at"]:
+                note += f" · {week_gone(w, now):.0f}% of week gone"
+            print(f"{label:<12}{'█' * filled}{'░' * (BAR - filled)} {w['used']:>3.0f}%  {note}")
 
 
 def statusline(now):
@@ -129,7 +162,7 @@ def statusline(now):
         data = json.load(sys.stdin)
     except ValueError:
         return
-    usage = merge(data.get("rate_limits") if isinstance(data, dict) else None, now)
+    usage = merge(data.get("rate_limits") if isinstance(data, dict) else None, now, profile_dir(data))
     parts = []
     for key, label in (("five_hour", "5h"), ("seven_day", "wk")):
         w = window(usage, key, now)

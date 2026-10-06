@@ -1,10 +1,12 @@
 # quietbar
 
-One quiet SwiftBar menu bar item for your whole Mac.
+Two quiet SwiftBar menu bar items: Mac for the state of your machine, AI for Claude Code.
 
-Disk, memory, services, ports, scheduled tasks, app presets and Claude usage each become one summary row, with their full menu one level down. The menu bar shows only an icon while everything is fine. When something needs attention, a short label appears next to the icon.
+**Mac** is the quietbar wrapper: disk, memory, services, ports, scheduled tasks and app presets each become one summary row, with their full menu one level down. The menu bar shows only an icon while everything is fine. When something needs attention, a short label appears next to the icon.
 
-This repo is the whole setup: the wrapper (`quietbar.1m.rb`), the plugins it wraps, one separate plugin for Claude agents (`claude-agents.15s.rb`), the helper scripts they call, a ready-made config and an installer. The wrapper also works on its own, with any SwiftBar plugins, without changing them. See [Config](#config).
+**AI** is its own plugin, `claude-agents.15s.rb`: how many Claude Code instances are running, and Claude plan usage, per Claude profile. See [Claude agents](#claude-agents).
+
+This repo is the whole setup: the wrapper (`quietbar.1m.rb`), the plugins it wraps, the separate AI plugin (`claude-agents.15s.rb`), the helper scripts they call, a ready-made config and an installer. The wrapper also works on its own, with any SwiftBar plugins, without changing them. See [Config](#config).
 
 ## What it looks like
 
@@ -22,7 +24,6 @@ Services — 3 running
 Ports — 16 listening
 Tasks — all on time
 Loadout — focus
-Claude — 5h 7% · wk 14%
 -------------------------------
 Refresh
 ```
@@ -60,16 +61,15 @@ The icon and label turn red if any alert is critical, otherwise amber.
 | Ports (`ports`) | What listens on TCP ports and who owns it, stop it, open it, find what holds a folder open. | |
 | Tasks (`tasks`) | Scheduled tasks (launchd agents and cron): what runs when, what ran last, what is overdue or failed. Also a `task` command. | |
 | Loadout (`loadout`) | Presets for what runs: pick one and services, launchd jobs and apps start or stop to match. | |
-| Claude (`claude-usage`) | Claude plan usage, 5-hour and weekly. Alerts from 85%. | python3, one setting in Claude Code, see [Claude usage](#claude-usage) |
-| Claude agents (`claude-agents.15s.rb`), its own menu bar item | How many Claude Code instances are running, grouped by Claude profile. See [Claude agents](#claude-agents). | |
+| AI (`claude-agents.15s.rb`), its own menu bar item | Running Claude Code instances and plan usage (5-hour and weekly) per Claude profile. See [Claude agents](#claude-agents). | python3 and one setting in Claude Code, for usage |
 | Git (`git-status`), off by default | Dirty, unpushed and stashed repos under your projects folder. | git |
 | Dev (`dev-processes`), off by default | Running dev processes (node first) and launchd jobs, with a stop button. | |
 
-The shared menu helper is `lib/menu_kit.rb`. Helper scripts in `bin/`: `svc.sh` (list and control Homebrew and supervisor services), `macstat.py` (memory and CPU per app), `claude-usage.py`, `task`, `task-run.sh` and `trash-rm.sh` (used by Tasks).
+The shared menu helper is `lib/menu_kit.rb`. Helper scripts in `bin/`: `svc.sh` (list and control Homebrew and supervisor services), `macstat.py` (memory and CPU per app), `claude-usage.py` (records Claude plan usage for the AI item), `task`, `task-run.sh` and `trash-rm.sh` (used by Tasks).
 
 ## Install
 
-You need macOS, [SwiftBar](https://swiftbar.app) and Ruby 2.6 or newer (the one macOS ships works; nothing outside the standard library is used). Mac and Claude rows also need the Command Line Tools (`xcode-select --install`), Services needs [Homebrew](https://brew.sh). `install.sh` checks and tells you what is missing. It installs nothing itself.
+You need macOS, [SwiftBar](https://swiftbar.app) and Ruby 2.6 or newer (the one macOS ships works; nothing outside the standard library is used). The Mac row and the Claude usage recorder also need the Command Line Tools (`xcode-select --install`), Services needs [Homebrew](https://brew.sh). `install.sh` checks and tells you what is missing. It installs nothing itself.
 
 Get the repo (clone it, or download the zip from GitHub), then run the installer from inside it:
 
@@ -80,35 +80,30 @@ cd quietbar
 
 What it does:
 
-- Copies `quietbar.1m.rb` into SwiftBar's current plugin folder (or `~/SwiftBar/Plugins` if none is set) and everything it wraps into a hidden `.quietbar/` folder inside it. SwiftBar does not load hidden folders, so the wrapped plugins stay out of the menu bar and you switch nothing off by hand. `claude-agents.15s.rb` goes next to quietbar as a second menu bar item, since it is not part of the wrapper; `--no-agents` leaves it out.
+- Copies `quietbar.1m.rb` into SwiftBar's current plugin folder (or `~/SwiftBar/Plugins` if none is set) and everything it wraps into a hidden `.quietbar/` folder inside it. SwiftBar does not load hidden folders, so the wrapped plugins stay out of the menu bar and you switch nothing off by hand. `claude-agents.15s.rb` goes next to quietbar as the second menu bar item (AI), since it is not part of the wrapper; `--no-agents` leaves it out.
 - Makes the scripts executable.
 - Writes `~/.config/quietbar/config.yml` and `~/.config/quietbar/presets.yml` if they don't exist.
 - Downloads the Homebrew services plugin and patches it (see [Third-party code](#third-party-code)).
 - Sets SwiftBar's plugin folder only when none is set. If SwiftBar already uses another folder, it says so and what to do (point SwiftBar at the target, or use `--target`).
 - Never overwrites a file without `--force`. It lists the ones it kept.
 
-Options: `--target DIR`, `--force`, `--no-fetch` (skip the download), `--no-prefs` (leave SwiftBar's preferences alone), `--no-agents` (skip the Claude agents item). To update, `git pull` and run `./install.sh --force`; your config and presets are never touched.
+Options: `--target DIR`, `--force`, `--no-fetch` (skip the download), `--no-prefs` (leave SwiftBar's preferences alone), `--no-agents` (skip the AI item). To update, `git pull` and run `./install.sh --force`; your config and presets are never touched.
 
 If the plugin folder already holds other plugins, they keep showing beside quietbar. The installer lists them. Move them out or switch them off in SwiftBar.
 
-### Claude usage
-
-Claude Code tells its status line how much of the plan is used. `claude-usage.py --statusline` is a status line that records it, and the Claude row reads that. Nothing calls an API and no login or token is read. Add this to `~/.claude/settings.json` (the installer prints the exact path, nothing is edited for you):
-
-```json
-"statusLine": { "type": "command", "command": "<plugin folder>/.quietbar/bin/claude-usage.py --statusline" }
-```
-
-Already have a status line? Call this script from yours and ignore its output. Until the first Claude response after that, the row says "no reading" and its menu says what to do. The cache is `~/.cache/claude-usage/usage.json`.
-
 ## Claude agents
 
-A menu bar item of its own, `claude-agents.15s.rb` (SwiftBar takes the 15 second refresh from the file name). It shows the number of Claude Code instances that are working right now, or `0` in grey. The dropdown has one group per Claude profile, with one row per open session and its running sub-agents indented below:
+The AI item, `claude-agents.15s.rb` (SwiftBar takes the 15 second refresh from the file name). It shows the number of Claude Code instances that are working right now, or `0` in grey. With `title: count_usage` (see below) the highest 5-hour plan usage follows the count, as `3 · 7%`. The dropdown opens with the plan usage of each profile, then has one group per Claude profile, with one row per open session and its running sub-agents indented below:
 
 ```
-sparkles 2
+sparkles 2          (title: count_usage shows "2 · 7%")
 ---
 2 active · 3 open · 2 interactive · 1 headless · 1 sub-agents
+---
+Plan usage
+Default  ·  5-hour 7%  ·  resets 18:00 (in 2h 55m)
+Default  ·  week 14%  ·  resets Sun 10:00 (in 4d 21h)  ·  30% of week gone
+Work  ·  no usage data (an API-key setup, or the status line isn't set up)
 ---
 Default · ~/.claude · 2 running
 api-refactor  ·  ~/code/api  ·  interactive  ·  opus 5.5  ·  138k ctx  ·  busy  ·  1h12m
@@ -123,17 +118,31 @@ Clicking a session focuses its terminal tab. Clicking a headless run (`claude -p
 
 **What counts.** A session is a `sessions/<pid>.json` whose process is still alive and still a `claude` process. A sub-agent is running when its parent session is alive, its transcript was written within the freshness window and the parent transcript holds no finish notice for it. The plugin only reads; nothing in the profiles is changed. The context figure is the last message's token count. A percentage is added only for models whose name carries `[1m]` (a 1M window), because the transcripts don't record the window size.
 
+**Plan usage.** Claude Code hands its status line the plan's 5-hour and weekly usage, and nothing else holds it: it is not in the session files or transcripts, and reading it from Anthropic's servers would need your login token, which quietbar never touches. So `bin/claude-usage.py --statusline` is a status line that records it, and the AI item reads that record. The numbers are as fresh as the last response in a Claude session, and the item only reads files, never an API. Add this to the `settings.json` of every profile you want usage for (the installer prints the path, nothing is edited for you):
+
+```json
+"statusLine": { "type": "command", "command": "<plugin folder>/.quietbar/bin/claude-usage.py --statusline" }
+```
+
+Already have a status line? Call this script from yours and ignore its output. Each profile gets its own reading, since each can be a different account: the script takes the profile from the session's transcript folder (else `CLAUDE_CONFIG_DIR`, else `~/.claude`) and writes `~/.cache/claude-usage/usage.json` for `~/.claude` and `~/.cache/claude-usage/profiles/<name>-<hash>/usage.json` for the others (the `CLAUDE_USAGE_CACHE` environment variable moves that folder). A profile with no reading, such as one that has no status line set up, or an API-key setup, which reports no plan limits, shows "no usage data". Rows turn amber from 60% and red from 85%. Run `claude-usage.py` without arguments to see the readings.
+
 **Terminal.** Clicks drive Terminal.app (the default) or iTerm2 with AppleScript; the first click makes macOS ask for permission to control it. For any other terminal, a click shows a notification saying so, since there is no portable way to focus or open a tab there. If a session runs inside tmux, its pane is selected whichever terminal you use.
 
 Settings go in the `claude_agents` block of the quietbar config. All of it is optional and the values shown are the defaults:
 
 ```yaml
 claude_agents:
+  title: count                # count, or count_usage: count plus the highest 5-hour usage, "3 · 7%"
   terminal: Terminal          # Terminal or iTerm2
   icon: sparkles              # SF Symbol
-  colors:
-    busy: '#2da44e,#4ade80'   # light,dark
+  colors:                     # light,dark
+    busy: '#2da44e,#4ade80'
     idle: '#8e8e93,#98989d'
+    warn: '#d98e04,#fbbf24'
+    critical: '#d93a2f,#f87171'
+  amber_from: 60              # plan usage % where amber starts
+  red_from: 85                # ... and red
+  usage_cache: ~/.cache/claude-usage   # where the item reads usage; set CLAUDE_USAGE_CACHE to match if you move it
   agent_fresh_minutes: 30     # a sub-agent counts as running only if written to this recently
   recent_hours: 2             # headless runs that ended within this window are listed
   recent_max: 8               # ... at most this many per profile
@@ -146,6 +155,14 @@ claude_agents:
 
 The plugin reads `QUIETBAR_CONFIG` or `~/.config/quietbar/config.yml`; the wrapper ignores this block. A config that doesn't parse is ignored, with a note at the bottom of the menu. `claude-agents.15s.rb profiles` prints the profiles it found, one per line.
 
+### Moving from the old layout
+
+Claude plan usage used to be a row in the Mac item. It now lives in the AI item, so quietbar has no Claude section any more. After `git pull` and `./install.sh --force`:
+
+- Delete the `- name: Claude` section (`path: claude-usage.1m.rb`) from your `~/.config/quietbar/config.yml`, and `.quietbar/modules/claude-usage.1m.rb` from the plugin folder. Your config is never touched by the installer.
+- The status line setting stays as it is, with one difference: it now records one reading per profile. Readings recorded before (`~/.cache/claude-usage/usage.json`) count as the `~/.claude` profile's. Other profiles show "no usage data" until their `settings.json` has the status line too.
+- The AI item appears next to quietbar. Move or switch off an older Claude agents plugin if you had one, or you get two.
+
 ## Settings
 
 Settings live in `~/.config/quietbar/config.yml` (`QUIETBAR_CONFIG` points elsewhere). The plugins read a few more from their environment. Put them under `env:` in the config; they are passed to every plugin. For the `task` command, `bin/svc.sh` and the like on the command line, export them in your shell too.
@@ -157,7 +174,7 @@ Settings live in `~/.config/quietbar/config.yml` (`QUIETBAR_CONFIG` points elsew
 | `QUIETBAR_SIZE_PATHS` | npm, gradle, Xcode, Docker and other dev caches (those that exist) | mac-health: colon-separated folders whose size it reports. |
 | `SUPERVISOR_CONF` | `<brew prefix>/etc/supervisord.conf` | Only used if you run supervisor. |
 | `LOADOUT_FILE` | `~/.config/quietbar/presets.yml` | Presets file for Loadout. |
-| `CLAUDE_USAGE_CACHE` | `~/.cache/claude-usage` | Where the Claude usage cache lives. |
+| `CLAUDE_USAGE_CACHE` | `~/.cache/claude-usage` | Where `claude-usage.py` records Claude usage. It runs from Claude Code, so set this in the environment Claude Code starts with, and set `claude_agents.usage_cache` to the same folder. |
 
 Other files: tasks keep their logs in `~/Library/Logs/quietbar-tasks`; mac-health caches slow probes in `~/.cache/swiftbar-mac-health`.
 

@@ -6,10 +6,11 @@
 # <xbar.desc>Counts running Claude Code instances (sessions, headless runs, sub-agents) across every Claude setup found on this Mac</xbar.desc>
 # <xbar.dependencies>ruby</xbar.dependencies>
 #
-# Menu bar: an icon and the number of live instances. Dropdown: grouped by
-# Claude profile, one row per session with its running sub-agents indented
-# below. This is its own menu bar item, not a section of quietbar; install.sh
-# puts it next to quietbar.1m.rb.
+# Menu bar: an icon and the number of live instances. Dropdown: plan usage per
+# profile, then one group per Claude profile with one row per session and its
+# running sub-agents indented below. This is the AI half of the bar, its own
+# menu bar item next to quietbar's Mac item; install.sh puts it next to
+# quietbar.1m.rb.
 #
 # Profiles: every config folder in the home folder named .claude or .claude-*
 # (plus the one in CLAUDE_CONFIG_DIR) that holds a sessions/ or projects/
@@ -31,6 +32,12 @@
 #   alive, the transcript was written within the freshness window (30 minutes
 #   by default), and the parent transcript holds no task-notification for it
 #   (or a foreground tool_result for it) newer than its last write.
+# - Usage: 5-hour and weekly plan percentages with their reset times, read from
+#   the cache bin/claude-usage.py writes when run as Claude Code's status line
+#   (one reading per profile, see the README). Only that cache is read, never
+#   an API, so the 15 second refresh costs nothing. A profile without a reading
+#   (no status line set up, or an API-key setup that reports no limits) shows
+#   "no usage data".
 # - Context: last assistant message's input + cache read + cache creation
 #   tokens. A percentage appears only when the model name carries "[1m]" (the
 #   transcripts don't record the window).
@@ -45,6 +52,7 @@
 
 require 'json'
 require 'time'
+require 'date'
 require 'yaml'
 require 'zlib'
 require 'shellwords'
@@ -94,6 +102,9 @@ end
 ICON = setting('icon', default: 'sparkles').to_s # SF Symbol
 MUTED = setting('colors', 'idle', default: '#8e8e93,#98989d').to_s
 GREEN = setting('colors', 'busy', default: '#2da44e,#4ade80').to_s
+AMBER = setting('colors', 'warn', default: '#d98e04,#fbbf24').to_s
+RED = setting('colors', 'critical', default: '#d93a2f,#f87171').to_s
+TITLE_USAGE = setting('title', default: 'count').to_s == 'count_usage'
 TERMINAL = setting('terminal', default: 'Terminal').to_s.strip
 
 TAIL = 64 * 1024
@@ -101,6 +112,10 @@ HEAD = 128 * 1024
 AGENT_FRESH = (positive(setting('agent_fresh_minutes'), 30) * 60).to_i
 RECENT = (positive(setting('recent_hours'), 2) * 3600).to_i
 RECENT_MAX = positive(setting('recent_max'), 8).to_i
+AMBER_FROM = positive(setting('amber_from'), 60)
+RED_FROM = positive(setting('red_from'), 85)
+USAGE_CACHE = File.expand_path(setting('usage_cache') || ENV['CLAUDE_USAGE_CACHE'] || '~/.cache/claude-usage')
+USAGE_STALE = 15 * 60
 
 # ---------- profiles ----------
 
@@ -392,6 +407,74 @@ def recent_headless(name, dir, live_ids, now)
   end.compact.first(RECENT_MAX)
 end
 
+# ---------- usage ----------
+
+USAGE_WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'week']].freeze
+WEEK = 7 * 24 * 3600
+
+# The readings bin/claude-usage.py recorded, by the realpath of their profile
+# folder. A reading without a recorded folder is the default profile's.
+def usage_readings
+  files = [File.join(USAGE_CACHE, 'usage.json')] + Dir.glob(File.join(USAGE_CACHE, 'profiles', '*', 'usage.json')).sort
+  files.each_with_object({}) do |f, readings|
+    data = parse(File.read(f))
+    readings[real(data['config_dir'] || File.join(HOME, '.claude'))] = data if data.is_a?(Hash)
+  rescue SystemCallError
+    next
+  end
+end
+
+# [percent used, reset time or nil] for one window; nil when it isn't recorded.
+# Once the reset time has passed nothing has been used in the new window yet.
+def usage_window(data, key, now)
+  w = data[key]
+  return nil unless w.is_a?(Hash) && w['used'].is_a?(Numeric) && w['resets_at'].is_a?(Numeric)
+  return [0.0, nil] if w['resets_at'] <= now.to_i
+
+  [w['used'].to_f, Time.at(w['resets_at'])]
+end
+
+def usage_tint(pct)
+  return RED if pct >= RED_FROM
+  return AMBER if pct >= AMBER_FROM
+
+  GREEN
+end
+
+def left(seconds)
+  seconds = [seconds.to_i, 0].max
+  return "#{seconds / 86_400}d #{seconds % 86_400 / 3600}h" if seconds >= 86_400
+  return format('%dh %02dm', seconds / 3600, seconds % 3600 / 60) if seconds >= 3600
+
+  "#{seconds / 60}m"
+end
+
+def reset_text(at, now)
+  clock = at.strftime(at.to_date == now.to_date ? '%H:%M' : '%a %H:%M')
+  "resets #{clock} (in #{left(at - now)})"
+end
+
+def usage_rows(label, data, now)
+  windows = data ? USAGE_WINDOWS.map { |key, name| [key, name, usage_window(data, key, now)] }.reject { |*, w| w.nil? } : []
+  if windows.empty?
+    return ["#{cell(label)}  ·  no usage data (an API-key setup, or the status line isn't set up) | sfimage=gauge color=\"#{MUTED}\"",
+            "#{cell(label)}  ·  see \"Claude agents\" in the quietbar README | alternate=true color=\"#{MUTED}\""]
+  end
+  windows.map do |key, name, (pct, at)|
+    parts = [cell(label), "#{name} #{pct.round}%", at ? reset_text(at, now) : 'reset, nothing used since']
+    parts << "#{(100.0 * (now - (at - WEEK)) / WEEK).clamp(0, 100).round}% of week gone" if key == 'seven_day' && at
+    age = now.to_i - data['seen_at'].to_i
+    parts << "as of #{span(age)} ago" if key == 'five_hour' && data['seen_at'] && age > USAGE_STALE
+    "#{parts.join('  ·  ')} | sfimage=gauge sfcolor=\"#{usage_tint(pct)}\""
+  end
+end
+
+# The highest 5-hour percentage across the profiles that have a reading.
+def top_five_hour(groups, readings, now)
+  groups.map { |_, dir, _, _| readings[real(dir)] }.compact
+        .map { |data| usage_window(data, 'five_hour', now) }.compact.map(&:first).max
+end
+
 # ---------- menu ----------
 
 SEPARATOR = /\A(--)*---\z/.freeze
@@ -465,7 +548,8 @@ def render
 
   total = groups.sum { |_, _, ss, _| ss.sum { |s| 1 + s[:agents].size } }
   active = groups.sum { |_, _, ss, _| ss.sum { |s| (s[:status].to_s == 'idle' ? 0 : 1) + s[:agents].size } }
-  puts(active.zero? ? "0 | sfimage=#{ICON} sfcolor=\"#{MUTED}\"" : "#{active} | sfimage=#{ICON}")
+  readings = usage_readings
+  puts bar_title(active, TITLE_USAGE ? top_five_hour(groups, readings, now) : nil)
   puts '---'
 
   nsess = groups.sum { |g| g[2].count { |s| !s[:headless] } }
@@ -473,7 +557,8 @@ def render
   nagent = groups.sum { |g| g[2].sum { |s| s[:agents].size } }
   puts "#{active} active · #{total} open · #{nsess} interactive · #{nhead} headless · #{nagent} sub-agents | color=\"#{MUTED}\""
 
-  lines = []
+  lines = ['---', "Plan usage | color=\"#{MUTED}\""]
+  groups.each { |name, dir, _, _| lines.concat(usage_rows(name, readings[real(dir)], now)) }
   groups.each do |name, dir, sessions, recent|
     lines << '---'
     count = sessions.sum { |s| 1 + s[:agents].size }
@@ -487,6 +572,14 @@ def render
   end
   keep_submenus_live(lines).each { |l| puts l }
   footer
+end
+
+def bar_title(active, top)
+  return "#{active} · #{top.round}% | sfimage=#{ICON} color=\"#{usage_tint(top)}\" sfcolor=\"#{usage_tint(top)}\"" if top && top >= AMBER_FROM
+  return "#{active} · #{top.round}% | sfimage=#{ICON}" if top
+  return "0 | sfimage=#{ICON} sfcolor=\"#{MUTED}\"" if active.zero?
+
+  "#{active} | sfimage=#{ICON}"
 end
 
 def settings_warning

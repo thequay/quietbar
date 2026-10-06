@@ -1,4 +1,4 @@
-# quietbar config. install.sh copies this to ~/.config/quietbar/config.yml the
+# quietbar config (the Mac item). install.sh copies this to ~/.config/quietbar/config.yml the
 # first time (never over an existing one). Sections show in this order. The rule
 # keys are explained in README.md; docs/rules-examples.yml has more examples.
 
@@ -18,15 +18,22 @@ separator: " — "         # between the section name and its summary
 #   QUIETBAR_SIZE_PATHS: ~/.npm:~/.cache     # mac-health: folders whose size it reports (colon-separated)
 #   SUPERVISOR_CONF: /opt/homebrew/etc/supervisord.conf   # only when you use supervisor
 
-# The separate Claude agents menu bar item (claude-agents.15s.rb) reads this
-# block; the wrapper ignores it. Everything is optional, the values shown are the
-# defaults. See README.md ("Claude agents").
+# The second menu bar item, AI (claude-agents.15s.rb), reads this block; the
+# wrapper ignores it. Running Claude Code instances and plan usage per Claude
+# profile. Everything is optional, the values shown are the defaults. See
+# README.md ("Claude agents").
 # claude_agents:
+#   title: count              # count, or count_usage ("3 · 7%": count plus the highest 5-hour usage)
 #   terminal: Terminal        # what clicks open: Terminal or iTerm2
 #   icon: sparkles            # SF Symbol
 #   colors:
-#     busy: '#2da44e,#4ade80'   # light,dark
+#     busy: '#2da44e,#4ade80'       # light,dark
 #     idle: '#8e8e93,#98989d'
+#     warn: '#d98e04,#fbbf24'       # usage from amber_from
+#     critical: '#d93a2f,#f87171'   # usage from red_from
+#   amber_from: 60            # plan usage % where amber starts
+#   red_from: 85              # ... and red
+#   usage_cache: ~/.cache/claude-usage    # where the item reads usage; set CLAUDE_USAGE_CACHE to match if you move it
 #   agent_fresh_minutes: 30   # a sub-agent counts as running only if written to this recently
 #   recent_hours: 2           # headless runs that ended within this window are listed
 #   recent_max: 8             # ... at most this many per profile
@@ -91,15 +98,6 @@ sections:
     title_strip: '\A◧\s*'
     alerts:
       - { body: '^⚠', level: warn, label: loadout problem }
-
-  # Claude plan usage (5-hour and weekly). Amber from 60%, red from 85%; only
-  # red raises an alert. Needs the status line set up, see README.md.
-  - name: Claude
-    path: claude-usage.1m.rb
-    summary:
-      - { title: '\A—\z', text: no reading }
-    alerts:
-      - { color: critical, title: '(?<pct>\d+)%', label: 'claude {pct:max}%' }
 
   # Not in the default menu. Uncomment to add them.
   #
