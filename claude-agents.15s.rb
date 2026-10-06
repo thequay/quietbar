@@ -34,8 +34,11 @@
 #   (or a foreground tool_result for it) newer than its last write.
 # - Usage: 5-hour and weekly plan percentages with their reset times, read from
 #   the cache bin/claude-usage.py writes when run as Claude Code's status line
-#   (one reading per profile, see the README). Only that cache is read, never
-#   an API, so the 15 second refresh costs nothing. A profile without a reading
+#   (<prefix>/usage.json for ~/.claude, <prefix>-<name>/usage.json for the
+#   others; see the README). Only that cache is read, never an API, so the 15
+#   second refresh costs nothing. A reading whose window has ended is shown as
+#   "reset since", and the bar title uses only readings under 15 minutes old.
+#   A profile without a reading
 #   (no status line set up, or an API-key setup that reports no limits) shows
 #   "no usage data".
 # - Context: last assistant message's input + cache read + cache creation
@@ -114,7 +117,8 @@ RECENT = (positive(setting('recent_hours'), 2) * 3600).to_i
 RECENT_MAX = positive(setting('recent_max'), 8).to_i
 AMBER_FROM = positive(setting('amber_from'), 60)
 RED_FROM = positive(setting('red_from'), 85)
-USAGE_CACHE = File.expand_path(setting('usage_cache') || ENV['CLAUDE_USAGE_CACHE'] || '~/.cache/claude-usage')
+# Prefix of the cache folders: <prefix> holds ~/.claude's reading, <prefix>-<name> the others'.
+USAGE_CACHE = File.expand_path(setting('usage_cache') || ENV['CLAUDE_USAGE_CACHE'] || '~/.cache/claude-usage').chomp('/')
 USAGE_STALE = 15 * 60
 
 # ---------- profiles ----------
@@ -412,26 +416,57 @@ end
 USAGE_WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'week']].freeze
 WEEK = 7 * 24 * 3600
 
-# The readings bin/claude-usage.py recorded, by the realpath of their profile
-# folder. A reading without a recorded folder is the default profile's.
-def usage_readings
-  files = [File.join(USAGE_CACHE, 'usage.json')] + Dir.glob(File.join(USAGE_CACHE, 'profiles', '*', 'usage.json')).sort
-  files.each_with_object({}) do |f, readings|
-    data = parse(File.read(f))
-    readings[real(data['config_dir'] || File.join(HOME, '.claude'))] = data if data.is_a?(Hash)
-  rescue SystemCallError
-    next
-  end
+# The account name a profile folder gets in the usage cache: "main" for ~/.claude, else the folder
+# name without the leading "." and "claude-" (~/.claude-work is "work"). The same rule as
+# bin/claude-usage.py and the author's own usage tool, so the three share one cache.
+def usage_account(dir)
+  return 'main' if real(dir) == real(File.join(HOME, '.claude'))
+
+  name = File.basename(real(dir).chomp('/')).sub(/\A\.+/, '')
+  name = name.delete_prefix('claude-').gsub(/[^A-Za-z0-9_.-]/, '-').gsub(/\A\.+|\.+\z/, '')
+  name.empty? || name == 'main' ? 'other' : name
 end
 
-# [percent used, reset time or nil] for one window; nil when it isn't recorded.
-# Once the reset time has passed nothing has been used in the new window yet.
+def read_usage_file(path)
+  data = parse(File.read(path))
+  data.is_a?(Hash) ? data : nil
+rescue SystemCallError
+  nil
+end
+
+# The reading for one profile folder: <prefix>/usage.json for ~/.claude, else the folder its name
+# maps to (<prefix>-<name>) unless that one says it belongs to another folder, else any
+# <prefix>-* folder whose account.json names this profile. nil when nothing is recorded.
+def usage_for(dir)
+  dir = real(dir)
+  return read_usage_file(File.join(USAGE_CACHE, 'usage.json')) if usage_account(dir) == 'main'
+
+  named = "#{USAGE_CACHE}-#{usage_account(dir)}"
+  candidates = [named] + Dir.glob("#{USAGE_CACHE}-*").sort.select { |d| File.directory?(d) && d != named }
+  candidates.each do |d|
+    owner = read_usage_file(File.join(d, 'account.json'))&.dig('config_dir')
+    next if owner ? real(File.expand_path(owner)) != dir : d != named
+    data = read_usage_file(File.join(d, 'usage.json')) and return data
+  end
+  nil
+end
+
+# What a window of a reading says now: nil when it isn't recorded, else
+# { pct:, at: reset time, over: true once that reset time has passed }.
 def usage_window(data, key, now)
   w = data[key]
   return nil unless w.is_a?(Hash) && w['used'].is_a?(Numeric) && w['resets_at'].is_a?(Numeric)
-  return [0.0, nil] if w['resets_at'] <= now.to_i
 
-  [w['used'].to_f, Time.at(w['resets_at'])]
+  { pct: w['used'].to_f, at: Time.at(w['resets_at']), over: w['resets_at'] <= now.to_i }
+end
+
+def usage_age(data, now)
+  data['seen_at'].is_a?(Numeric) ? [now.to_i - data['seen_at'].to_i, 0].max : nil
+end
+
+def usage_fresh?(data, now)
+  age = usage_age(data, now)
+  !age.nil? && age <= USAGE_STALE
 end
 
 def usage_tint(pct)
@@ -449,6 +484,15 @@ def left(seconds)
   "#{seconds / 60}m"
 end
 
+# How long ago a reading is: 40m, 14h, 3d.
+def ago(seconds)
+  seconds = [seconds.to_i, 0].max
+  return "#{seconds / 86_400}d" if seconds >= 172_800
+  return "#{seconds / 3600}h" if seconds >= 3600
+
+  "#{seconds / 60}m"
+end
+
 def reset_text(at, now)
   clock = at.strftime(at.to_date == now.to_date ? '%H:%M' : '%a %H:%M')
   "resets #{clock} (in #{left(at - now)})"
@@ -460,19 +504,26 @@ def usage_rows(label, data, now)
     return ["#{cell(label)}  ·  no usage data (an API-key setup, or the status line isn't set up) | sfimage=gauge color=\"#{MUTED}\"",
             "#{cell(label)}  ·  see \"Claude agents\" in the quietbar README | alternate=true color=\"#{MUTED}\""]
   end
-  windows.map do |key, name, (pct, at)|
-    parts = [cell(label), "#{name} #{pct.round}%", at ? reset_text(at, now) : 'reset, nothing used since']
-    parts << "#{(100.0 * (now - (at - WEEK)) / WEEK).clamp(0, 100).round}% of week gone" if key == 'seven_day' && at
-    age = now.to_i - data['seen_at'].to_i
-    parts << "as of #{span(age)} ago" if key == 'five_hour' && data['seen_at'] && age > USAGE_STALE
-    "#{parts.join('  ·  ')} | sfimage=gauge sfcolor=\"#{usage_tint(pct)}\""
+  age = usage_age(data, now)
+  note = age && age > USAGE_STALE ? "as of #{ago(age)} ago" : nil
+  windows.map do |key, name, w|
+    if w[:over]
+      # The reading's window has ended, so its percentage says nothing about the new one.
+      parts = [cell(label), "#{name} reset since", ["last seen #{w[:pct].round}%", age && "#{ago(age)} ago"].compact.join(' ')]
+      next "#{parts.join('  ·  ')} | sfimage=gauge color=\"#{MUTED}\""
+    end
+    parts = [cell(label), "#{name} #{w[:pct].round}%", reset_text(w[:at], now)]
+    parts << "#{(100.0 * (now - (w[:at] - WEEK)) / WEEK).clamp(0, 100).round}% of week gone" if key == 'seven_day'
+    parts << note if note
+    "#{parts.join('  ·  ')} | sfimage=gauge sfcolor=\"#{usage_tint(w[:pct])}\""
   end
 end
 
-# The highest 5-hour percentage across the profiles that have a reading.
-def top_five_hour(groups, readings, now)
-  groups.map { |_, dir, _, _| readings[real(dir)] }.compact
-        .map { |data| usage_window(data, 'five_hour', now) }.compact.map(&:first).max
+# The highest 5-hour percentage across the profiles whose reading is fresh and whose window is
+# still open. nil when there is none.
+def top_five_hour(readings, now)
+  readings.compact.select { |data| usage_fresh?(data, now) }
+          .map { |data| usage_window(data, 'five_hour', now) }.compact.reject { |w| w[:over] }.map { |w| w[:pct] }.max
 end
 
 # ---------- menu ----------
@@ -548,8 +599,8 @@ def render
 
   total = groups.sum { |_, _, ss, _| ss.sum { |s| 1 + s[:agents].size } }
   active = groups.sum { |_, _, ss, _| ss.sum { |s| (s[:status].to_s == 'idle' ? 0 : 1) + s[:agents].size } }
-  readings = usage_readings
-  puts bar_title(active, TITLE_USAGE ? top_five_hour(groups, readings, now) : nil)
+  readings = groups.map { |_, dir, _, _| usage_for(dir) }
+  puts bar_title(active, TITLE_USAGE ? top_five_hour(readings, now) : nil)
   puts '---'
 
   nsess = groups.sum { |g| g[2].count { |s| !s[:headless] } }
@@ -558,7 +609,7 @@ def render
   puts "#{active} active · #{total} open · #{nsess} interactive · #{nhead} headless · #{nagent} sub-agents | color=\"#{MUTED}\""
 
   lines = ['---', "Plan usage | color=\"#{MUTED}\""]
-  groups.each { |name, dir, _, _| lines.concat(usage_rows(name, readings[real(dir)], now)) }
+  groups.each_with_index { |(name, _, _, _), i| lines.concat(usage_rows(name, readings[i], now)) }
   groups.each do |name, dir, sessions, recent|
     lines << '---'
     count = sessions.sum { |s| 1 + s[:agents].size }

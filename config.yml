@@ -33,7 +33,7 @@ separator: " — "         # between the section name and its summary
 #     critical: '#d93a2f,#f87171'   # usage from red_from
 #   amber_from: 60            # plan usage % where amber starts
 #   red_from: 85              # ... and red
-#   usage_cache: ~/.cache/claude-usage    # where the item reads usage; set CLAUDE_USAGE_CACHE to match if you move it
+#   usage_cache: ~/.cache/claude-usage    # prefix: this folder is ~/.claude's, <prefix>-<name> the others'; set CLAUDE_USAGE_CACHE to match if you move it
 #   agent_fresh_minutes: 30   # a sub-agent counts as running only if written to this recently
 #   recent_hours: 2           # headless runs that ended within this window are listed
 #   recent_max: 8             # ... at most this many per profile

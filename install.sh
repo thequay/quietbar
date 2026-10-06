@@ -195,7 +195,8 @@ if [[ $agents == 1 ]]; then
   say "  - Claude plan usage, shown in the AI item: Claude Code has to report it. Add this to the settings.json"
   say "    of every Claude profile you want usage for, e.g. ~/.claude/settings.json (nothing is edited for you):"
   say "      \"statusLine\": { \"type\": \"command\", \"command\": \"$target/.quietbar/bin/claude-usage.py --statusline\" }"
-  say "    Until then a profile shows \"no usage data\"."
+  say "    Until then a profile shows \"no usage data\". The readings go to ~/.cache/claude-usage (~/.claude) and"
+  say "    ~/.cache/claude-usage-<name> (other profiles), the same layout as the author's own usage tool."
 fi
 
 if [[ ${#missing[@]} -gt 0 ]]; then

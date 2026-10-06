@@ -16,15 +16,16 @@ Set it up in the settings.json of every Claude profile you want usage for (~/.cl
 script first, or call it from yours and ignore its output.
 
 Each profile gets its own reading, because each can be a different account. The profile is the
-folder the session's transcript is under, else CLAUDE_CONFIG_DIR, else ~/.claude. Cache:
-~/.cache/claude-usage/usage.json for ~/.claude, ~/.cache/claude-usage/profiles/<name>/usage.json for
-the others (CLAUDE_USAGE_CACHE moves it all). Each file records its profile folder as "config_dir".
-Standard library only.
+folder the session's transcript is under, else CLAUDE_CONFIG_DIR, else ~/.claude. Cache, with the
+prefix ~/.cache/claude-usage (CLAUDE_USAGE_CACHE changes it): <prefix>/usage.json for ~/.claude,
+<prefix>-<name>/usage.json for any other profile, where <name> is the folder name without the
+leading "." and "claude-" (~/.claude-work is "work"). The latter folder also holds account.json,
+{"config_dir": "<profile folder>"}. This is the layout the author's own, larger usage tool uses, so
+the two can share a cache. Standard library only.
 """
 
 import fcntl
 import glob
-import hashlib
 import json
 import os
 import re
@@ -32,7 +33,7 @@ import sys
 import tempfile
 import time
 
-CACHE = os.environ.get("CLAUDE_USAGE_CACHE") or os.path.join(os.path.expanduser("~"), ".cache", "claude-usage")
+PREFIX = os.environ.get("CLAUDE_USAGE_CACHE") or os.path.join(os.path.expanduser("~"), ".cache", "claude-usage")
 DEFAULT_PROFILE = os.path.realpath(os.path.join(os.path.expanduser("~"), ".claude"))
 WINDOWS = {"five_hour": ("5h", 5 * 3600), "seven_day": ("week", 7 * 86400)}
 SAME_WINDOW = 600  # reset times this close belong to the same window
@@ -47,11 +48,20 @@ def profile_dir(data):
     return os.path.realpath(os.path.expanduser(folder))
 
 
-def cache_dir_for(config_dir):
+def account_name(config_dir):
+    """"main" for ~/.claude, else the folder name without the leading "." and "claude-"."""
     if config_dir == DEFAULT_PROFILE:
-        return CACHE
-    name = re.sub(r"[^A-Za-z0-9_.-]", "-", os.path.basename(config_dir).lstrip(".")) or "profile"
-    return os.path.join(CACHE, "profiles", f"{name}-{hashlib.sha1(config_dir.encode()).hexdigest()[:6]}")
+        return "main"
+    name = os.path.basename(config_dir.rstrip("/")).lstrip(".")
+    if name.startswith("claude-"):
+        name = name[len("claude-"):]
+    name = re.sub(r"[^A-Za-z0-9_.-]", "-", name).strip(".")
+    return name if name and name != "main" else "other"
+
+
+def cache_dir_for(config_dir):
+    name = account_name(config_dir)
+    return PREFIX if name == "main" else f"{PREFIX}-{name}"
 
 
 def read_usage(path):
@@ -87,21 +97,24 @@ def merge(limits, now, config_dir):
                 changed = True
         if changed:
             usage["seen_at"] = now
-            usage["config_dir"] = config_dir
+            usage.pop("config_dir", None)
             fd, tmp = tempfile.mkstemp(dir=cache, suffix=".tmp")
             with os.fdopen(fd, "w") as f:
                 json.dump(usage, f, indent=1)
             os.replace(tmp, usage_file)
+        if cache != PREFIX:
+            account = os.path.join(cache, "account.json")
+            if read_usage(account).get("config_dir") != config_dir:
+                with open(account, "w") as f:
+                    json.dump({"config_dir": config_dir}, f, indent=1)
         return usage
 
 
-def window(usage, key, now):
-    """A window's reading, or zero use once its reset time has passed. None when unknown."""
+def window(usage, key):
+    """A window's recorded reading, or None when it isn't there."""
     w = usage.get(key)
     if not isinstance(w, dict) or "used" not in w or "resets_at" not in w:
         return None
-    if w["resets_at"] <= now:
-        return {"used": 0.0, "resets_at": None}
     return w
 
 
@@ -127,9 +140,12 @@ def week_gone(w, now):
 
 
 def caches():
-    """Every recorded reading, the default profile's first."""
-    files = [os.path.join(CACHE, "usage.json")] + sorted(glob.glob(os.path.join(CACHE, "profiles", "*", "usage.json")))
-    return [(read_usage(f).get("config_dir") or DEFAULT_PROFILE, read_usage(f)) for f in files if os.path.exists(f)]
+    """Every recorded reading as (profile folder, data), the default profile's first."""
+    found = [(DEFAULT_PROFILE, os.path.join(PREFIX, "usage.json"))]
+    for d in sorted(glob.glob(PREFIX + "-*")):
+        folder = read_usage(os.path.join(d, "account.json")).get("config_dir")
+        found.append((folder or d[len(PREFIX) + 1:], os.path.join(d, "usage.json")))
+    return [(folder, read_usage(f)) for folder, f in found if os.path.exists(f)]
 
 
 def report(now):
@@ -147,12 +163,15 @@ def report(now):
         shown = "~" + config_dir[len(home):] if config_dir.startswith(home + "/") else config_dir
         print(f"CLAUDE USAGE {shown}  " + (f"as of {span(age)} ago" if age > STALE else "from the last Claude response"))
         for key, (label, _) in WINDOWS.items():
-            w = window(usage, key, now)
+            w = window(usage, key)
             if not w:
                 continue
+            if w["resets_at"] <= now:
+                print(f"{label:<12}reset since, last seen {w['used']:.0f}% {span(age)} ago")
+                continue
             filled = max(0, min(BAR, round(w["used"] / 100 * BAR)))
-            note = f"resets {when(w['resets_at'], now)}" if w["resets_at"] else "reset, nothing used since"
-            if key == "seven_day" and w["resets_at"]:
+            note = f"resets {when(w['resets_at'], now)}"
+            if key == "seven_day":
                 note += f" · {week_gone(w, now):.0f}% of week gone"
             print(f"{label:<12}{'█' * filled}{'░' * (BAR - filled)} {w['used']:>3.0f}%  {note}")
 
@@ -165,8 +184,8 @@ def statusline(now):
     usage = merge(data.get("rate_limits") if isinstance(data, dict) else None, now, profile_dir(data))
     parts = []
     for key, label in (("five_hour", "5h"), ("seven_day", "wk")):
-        w = window(usage, key, now)
-        if w:
+        w = window(usage, key)
+        if w and w["resets_at"] > now:
             parts.append(f"{label} {w['used']:.0f}%")
     print(" · ".join(parts))
 

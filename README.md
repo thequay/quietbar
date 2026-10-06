@@ -124,7 +124,7 @@ Clicking a session focuses its terminal tab. Clicking a headless run (`claude -p
 "statusLine": { "type": "command", "command": "<plugin folder>/.quietbar/bin/claude-usage.py --statusline" }
 ```
 
-Already have a status line? Call this script from yours and ignore its output. Each profile gets its own reading, since each can be a different account: the script takes the profile from the session's transcript folder (else `CLAUDE_CONFIG_DIR`, else `~/.claude`) and writes `~/.cache/claude-usage/usage.json` for `~/.claude` and `~/.cache/claude-usage/profiles/<name>-<hash>/usage.json` for the others (the `CLAUDE_USAGE_CACHE` environment variable moves that folder). A profile with no reading, such as one that has no status line set up, or an API-key setup, which reports no plan limits, shows "no usage data". Rows turn amber from 60% and red from 85%. Run `claude-usage.py` without arguments to see the readings.
+Already have a status line? Call this script from yours and ignore its output. Each profile gets its own reading, since each can be a different account: the script takes the profile from the session's transcript folder (else `CLAUDE_CONFIG_DIR`, else `~/.claude`) and writes `~/.cache/claude-usage/usage.json` for `~/.claude` and `~/.cache/claude-usage-<name>/usage.json` for the others, where `<name>` is the folder name without the leading `.` and `claude-` (`~/.claude-work` is `work`), plus an `account.json` there with the profile folder. `CLAUDE_USAGE_CACHE` changes the prefix `~/.cache/claude-usage`. This is the layout of the author's own, larger usage tool, so the two can share one cache. The AI item finds a profile's reading by that name, or by the `account.json` of any `<prefix>-*` folder that names the profile, so an odd folder name still works. A profile with no reading, such as one that has no status line set up, or an API-key setup, which reports no plan limits, shows "no usage data". A status line only records while a session in that profile is open, so an old reading is normal: rows older than 15 minutes say "as of 14h ago", a window whose reset time has passed shows "reset since, last seen 0% 14h ago" instead of its old percentage, and `title: count_usage` leaves out readings older than 15 minutes. Rows turn amber from 60% and red from 85%. Run `claude-usage.py` without arguments to see the readings.
 
 **Terminal.** Clicks drive Terminal.app (the default) or iTerm2 with AppleScript; the first click makes macOS ask for permission to control it. For any other terminal, a click shows a notification saying so, since there is no portable way to focus or open a tab there. If a session runs inside tmux, its pane is selected whichever terminal you use.
 
@@ -142,7 +142,7 @@ claude_agents:
     critical: '#d93a2f,#f87171'
   amber_from: 60              # plan usage % where amber starts
   red_from: 85                # ... and red
-  usage_cache: ~/.cache/claude-usage   # where the item reads usage; set CLAUDE_USAGE_CACHE to match if you move it
+  usage_cache: ~/.cache/claude-usage   # prefix of the usage cache: this folder for ~/.claude, <prefix>-<name> for the others. Set CLAUDE_USAGE_CACHE to match if you move it
   agent_fresh_minutes: 30     # a sub-agent counts as running only if written to this recently
   recent_hours: 2             # headless runs that ended within this window are listed
   recent_max: 8               # ... at most this many per profile
@@ -160,7 +160,7 @@ The plugin reads `QUIETBAR_CONFIG` or `~/.config/quietbar/config.yml`; the wrapp
 Claude plan usage used to be a row in the Mac item. It now lives in the AI item, so quietbar has no Claude section any more. After `git pull` and `./install.sh --force`:
 
 - Delete the `- name: Claude` section (`path: claude-usage.1m.rb`) from your `~/.config/quietbar/config.yml`, and `.quietbar/modules/claude-usage.1m.rb` from the plugin folder. Your config is never touched by the installer.
-- The status line setting stays as it is, with one difference: it now records one reading per profile. Readings recorded before (`~/.cache/claude-usage/usage.json`) count as the `~/.claude` profile's. Other profiles show "no usage data" until their `settings.json` has the status line too.
+- The status line setting stays as it is, with one difference: it now records one reading per profile. The reading of `~/.claude` stays at `~/.cache/claude-usage/usage.json`; other profiles show "no usage data" until their `settings.json` has the status line too.
 - The AI item appears next to quietbar. Move or switch off an older Claude agents plugin if you had one, or you get two.
 
 ## Settings
@@ -174,7 +174,7 @@ Settings live in `~/.config/quietbar/config.yml` (`QUIETBAR_CONFIG` points elsew
 | `QUIETBAR_SIZE_PATHS` | npm, gradle, Xcode, Docker and other dev caches (those that exist) | mac-health: colon-separated folders whose size it reports. |
 | `SUPERVISOR_CONF` | `<brew prefix>/etc/supervisord.conf` | Only used if you run supervisor. |
 | `LOADOUT_FILE` | `~/.config/quietbar/presets.yml` | Presets file for Loadout. |
-| `CLAUDE_USAGE_CACHE` | `~/.cache/claude-usage` | Where `claude-usage.py` records Claude usage. It runs from Claude Code, so set this in the environment Claude Code starts with, and set `claude_agents.usage_cache` to the same folder. |
+| `CLAUDE_USAGE_CACHE` | `~/.cache/claude-usage` | Prefix of the folders where `claude-usage.py` records Claude usage (`<prefix>` for `~/.claude`, `<prefix>-<name>` for the others). It runs from Claude Code, so set this in the environment Claude Code starts with, and set `claude_agents.usage_cache` to the same folder. |
 
 Other files: tasks keep their logs in `~/Library/Logs/quietbar-tasks`; mac-health caches slow probes in `~/.cache/swiftbar-mac-health`.
 
