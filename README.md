@@ -104,18 +104,18 @@ Default  ·  ~/.claude  ·  3 running
 5-hour ██░░░░░░░░░░░░░░░░░░    8%  ↻17:00
 Week   █████░░░░░░░░░░░░░░░   26%  ↻Sun 10:00
   time ██████░░░░░░░░░░░░░░   30%  on pace
-idle  api-refactor                        opus 5.5    178k ctx         3h26m
-busy  docs-pass                           sonnet 5.5  119k ctx           35m
-        Explore: Find the retry logic     sonnet 5.5  72k ctx             2m
+idle   api-refactor                opus 5.5    178k ctx  3h26m
+busy   docs-pass                   sonnet 5.5  119k ctx    35m
+         Explore: Find retry logic  sonnet 5.5   72k ctx     2m
 ---
 Work  ·  ~/.claude-work  ·  0 running
-5-hour ░░░░░░░░░░░░░░░░░░░░     –  reset since · last seen 0% · 14h ago
+5-hour ░░░░░░░░░░░░░░░░░░░░     –  reset since · last seen 0% 14h ago
 Week   ██░░░░░░░░░░░░░░░░░░   12%  ↻Fri 04:00 · as of 14h ago
   time ████████████░░░░░░░░   62%  up to 50 pts under pace
 None running
 ```
 
-The usage rows are the 5-hour and weekly windows, each with a bar, the percent used and when it resets (↻ and the clock time, with the weekday when it is not today, as in the Claude status line). The `time` row under the week is how much of the week has gone, with a note comparing it to what you have used: "38 pts under pace" is capacity that is lost at the reset, "12 pts over pace" means the week is being used up early (the row turns amber), and within 5 points it says "on pace". Usage rows are green, amber from `amber_from` and red from `red_from`. A reading older than 15 minutes is grey and says "as of 14h ago" (its pace note says "up to" or "at least", since the use can only have grown). A window that has ended shows an empty bar and "reset since", with what it last said. A profile without a reading shows "Usage no data" in its group. In a session row, busy rows are in normal text with a green icon and idle rows are grey; the working folder, pid and session id are under each row while you hold Option.
+The usage rows are the 5-hour and weekly windows, each with a bar, the percent used and when it resets (↻ and the clock time, with the weekday when it is not today, as in the Claude status line). The `time` row under the week is how much of the week has gone, with a note comparing it to what you have used: "38 pts under pace" is capacity that is lost at the reset, "12 pts over pace" means the week is being used up early (the row turns amber), and within 5 points it says "on pace". Usage rows are green, amber from `amber_from` and red from `red_from`. A reading older than 15 minutes is grey and says "as of 14h ago" (its pace note says "up to" or "at least", since the use can only have grown). A window that has ended shows an empty bar and "reset since", with what it last said. A profile without a reading shows "Usage no data" in its group. Every row carries a small icon (a person for the profile, a clock for the 5-hour window, a calendar for the week, a timer for the time row, a terminal, bolt or arrow for sessions, headless runs and sub-agents), because macOS indents the text of rows with an icon, and with all rows alike the columns start at the same place. The columns are one grid for the whole menu: the bar sits above the session names and the reset note above the model, context and age columns, numbers are right-aligned, and names longer than the column are cut with an ellipsis. In a session row, busy rows are in normal text with a green icon and idle rows are grey; the working folder, pid and session id are under each row while you hold Option.
 
 Clicking a session focuses its terminal tab. Clicking a headless run (`claude -p`) or a sub-agent opens a read-only follower of its transcript in a new tab. Under "Recent headless" in each group, clicking a finished run resumes it in a new tab. Holding Option shows folder, pid, tty and session id under each row.
 

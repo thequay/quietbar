@@ -417,6 +417,7 @@ end
 USAGE_WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'Week']].freeze
 WEEK = 7 * 24 * 3600
 BAR_WIDTH = 20
+USAGE_ICONS = { 'five_hour' => 'clock', 'seven_day' => 'calendar' }.freeze
 ON_PACE = 5 # points of use vs time gone within which the week counts as on pace
 
 # The account name a profile folder gets in the usage cache: "main" for ~/.claude, else the folder
@@ -495,13 +496,41 @@ def bar(pct, width = BAR_WIDTH)
   ('█' * filled) + ('░' * (width - filled))
 end
 
-# One monospace row, so labels, bars and numbers line up down the menu.
-def mono_row(text, color = nil, extra = nil)
-  ["#{cell(text)} | font=Menlo", color && "color=\"#{color}\"", extra].compact.join(' ')
+# The column grid of the whole dropdown, worked out from every group's rows so the profiles line up
+# with each other. Left block: label/status (6), the name or bar column (NAME_MIN to NAME_MAX, longer
+# names are cut with an ellipsis). Right block: model, context and age, as wide as the longest value.
+# A usage row's bar sits in the name column and its note in the model column, so the two kinds of
+# row share column edges and read as one table.
+NAME_MIN = 26
+NAME_MAX = 32
+
+def session_cells(s, now)
+  label = s[:headless] ? (s[:task] || s[:name]) : (s[:name] || s[:task] || "pid #{s[:pid]}")
+  [s[:status].to_s, label.to_s, pretty_model(s[:model]), ctx_text(s[:model], s[:ctx], s[:cmd]), span(now - s[:started])]
 end
 
-def usage_line(label, bar_text, pct_text, note)
-  "#{label.ljust(6)} #{bar_text}  #{pct_text.rjust(4)}  #{note}".rstrip
+def agent_cells(a, now)
+  ['', "  #{a[:type]}: #{a[:desc] || 'no description'}", pretty_model(a[:model]), ctx_text(a[:model], a[:ctx]),
+   span(now - a[:started])]
+end
+
+def grid_for(groups, now)
+  cells = groups.flat_map { |_, _, ss, _| ss.flat_map { |s| [session_cells(s, now)] + s[:agents].map { |a| agent_cells(a, now) } } }
+  { name: cells.map { |c| c[1].size }.max.to_i.clamp(NAME_MIN, NAME_MAX),
+    model: [cells.map { |c| c[2].size }.max.to_i, 6].max,
+    ctx: [cells.map { |c| c[3].size }.max.to_i, 8].max,
+    age: [cells.map { |c| c[4].size }.max.to_i, 3].max }
+end
+
+# One monospace row; every row of a group carries an icon, so the menu gives all of them the same
+# indent and the columns start at the same x.
+def mono_row(text, color, icon, icon_color = color)
+  ["#{cell(text)} | font=Menlo", color && "color=\"#{color}\"", "sfimage=#{icon}",
+   icon_color && "sfcolor=\"#{icon_color}\""].compact.join(' ')
+end
+
+def usage_line(label, bar_text, pct_text, note, grid)
+  "#{label.ljust(6)} #{bar_text}  #{pct_text.rjust(4)}".ljust(7 + grid[:name]) + "  #{note}".rstrip
 end
 
 # Use against time gone: "38 pts under pace" is capacity that is lost at the reset.
@@ -516,10 +545,10 @@ end
 # The rows of one profile's usage: a bar per window (5-hour, week), then how much of the week has
 # gone. Fresh readings are coloured by level, a reading older than 15 minutes is grey with its age,
 # a window that has ended shows an empty bar with what it last said.
-def usage_rows(data, now)
+def usage_rows(data, now, grid)
   windows = data ? USAGE_WINDOWS.map { |key, name| [key, name, usage_window(data, key, now)] }.reject { |*, w| w.nil? } : []
   if windows.empty?
-    return [mono_row("#{'Usage'.ljust(6)} no data (an API-key setup, or the status line isn't set up)", MUTED),
+    return [mono_row("#{'Usage'.ljust(6)} no data (an API-key setup, or the status line isn't set up)", MUTED, 'gauge'),
             "see \"Claude agents\" in the quietbar README | alternate=true color=\"#{MUTED}\""]
   end
   age = usage_age(data, now)
@@ -528,20 +557,21 @@ def usage_rows(data, now)
   windows.each do |key, name, w|
     if w[:over]
       # The reading's window has ended, so its percentage says nothing about the new one.
-      note = ['reset since', "last seen #{w[:pct].round}%", age && "#{ago(age)} ago"].compact.join(' · ')
-      rows << mono_row(usage_line(name, bar(0), '–', note), MUTED)
+      note = ['reset since', "last seen #{w[:pct].round}% #{age && "#{ago(age)} ago"}".strip].join(' · ')
+      rows << mono_row(usage_line(name, bar(0), '–', note, grid), MUTED, USAGE_ICONS[key])
       next
     end
     color = stale ? MUTED : usage_tint(w[:pct])
     clock = w[:at].strftime(w[:at].to_date == now.to_date ? '%H:%M' : '%a %H:%M')
     note = ["↻#{clock}", stale ? "as of #{ago(age)} ago" : nil].compact.join(' · ')
-    rows << mono_row(usage_line(name, bar(w[:pct]), format('%d%%', w[:pct].round), note), color)
+    rows << mono_row(usage_line(name, bar(w[:pct]), format('%d%%', w[:pct].round), note, grid), color, USAGE_ICONS[key])
     next unless key == 'seven_day'
 
     gone = (100.0 * (now - (w[:at] - WEEK)) / WEEK).clamp(0, 100)
     gap = w[:pct] - gone
     pace_color = stale || gap.abs <= ON_PACE ? MUTED : (gap > 0 ? AMBER : nil)
-    rows << mono_row(usage_line('  time', bar(gone), format('%d%%', gone.round), pace_text(w[:pct], gone, stale)), pace_color)
+    rows << mono_row(usage_line('  time', bar(gone), format('%d%%', gone.round), pace_text(w[:pct], gone, stale), grid), pace_color,
+                     'timer')
   end
   rows
 end
@@ -583,31 +613,31 @@ def action(*params)
   (parts + ['terminal=false']).join(' ')
 end
 
-# Session and sub-agent rows share one set of columns: status, name, model, context, age.
-def session_line(status, label, model, ctx, age)
-  [status.to_s.ljust(4), clip(label, 34).ljust(34), model.to_s.ljust(10), ctx.to_s.ljust(14), age.to_s.rjust(6)].join('  ')
+def session_line(cells, grid)
+  status, label, model, ctx, age = cells
+  indent = label[/\A */]
+  name = indent + clip(label, grid[:name] - indent.size)
+  "#{status.ljust(6)} #{name.ljust(grid[:name])}  #{model.ljust(grid[:model])}  " \
+    "#{ctx.rjust(grid[:ctx])}  #{age.rjust(grid[:age])}"
 end
 
-def session_rows(s, now)
+def session_rows(s, now, grid)
   busy = s[:status].to_s == 'busy'
-  label = s[:headless] ? (s[:task] || s[:name]) : (s[:name] || s[:task] || "pid #{s[:pid]}")
   click = if s[:headless]
             s[:path] ? action('follow', s[:path], s[:pid]) : nil
           else
             action('focus', s[:pid])
           end
   icon = s[:headless] ? 'bolt.fill' : 'terminal'
-  line = session_line(s[:status], label, pretty_model(s[:model]), ctx_text(s[:model], s[:ctx], s[:cmd]), span(now - s[:started]))
-  row = mono_row(line, busy ? nil : MUTED, "sfimage=#{icon} sfcolor=\"#{busy ? GREEN : MUTED}\"")
+  row = mono_row(session_line(session_cells(s, now), grid), busy ? nil : MUTED, icon, busy ? GREEN : MUTED)
   row += " #{click}" if click
   detail = [s[:headless] ? 'headless' : 'interactive', short_path(s[:cwd]), "pid #{s[:pid]}", s[:tty] == '??' ? 'no tty' : s[:tty],
             "session #{s[:sid][0, 8]}"]
   detail << "task: #{clip(s[:task], 80)}" if s[:task] && !s[:headless]
   rows = [row, "#{cell(detail.compact.join('  ·  '))} | alternate=true color=\"#{MUTED}\""]
   s[:agents].each do |a|
-    line = session_line('', "  #{a[:type]}: #{a[:desc] || 'no description'}", pretty_model(a[:model]), ctx_text(a[:model], a[:ctx]),
-                        span(now - a[:started]))
-    rows << "#{mono_row(line, nil, "sfimage=arrow.turn.down.right sfcolor=\"#{GREEN}\"")} #{action('follow', a[:path], 0)}"
+    rows << "#{mono_row(session_line(agent_cells(a, now), grid), nil, 'arrow.turn.down.right', GREEN)} " \
+            "#{action('follow', a[:path], 0)}"
   end
   rows
 end
@@ -636,16 +666,18 @@ def render
   nsess = groups.sum { |g| g[2].count { |s| !s[:headless] } }
   nhead = groups.sum { |g| g[2].count { |s| s[:headless] } }
   nagent = groups.sum { |g| g[2].sum { |s| s[:agents].size } }
-  puts "#{active} active · #{total} open · #{nsess} interactive · #{nhead} headless · #{nagent} sub-agents | color=\"#{MUTED}\""
+  puts "#{active} active · #{total} open · #{nsess} interactive · #{nhead} headless · #{nagent} sub-agents | " \
+       "sfimage=list.bullet color=\"#{MUTED}\" sfcolor=\"#{MUTED}\""
+  grid = grid_for(groups, now)
 
   lines = []
   groups.each_with_index do |(name, dir, sessions, recent), i|
     lines << '---'
     count = sessions.sum { |s| 1 + s[:agents].size }
-    lines << "#{cell(name)}  ·  #{short_path(dir)}  ·  #{count} running | font=HelveticaNeue-Bold"
-    lines.concat(usage_rows(readings[i], now))
-    lines << "None running | color=\"#{MUTED}\"" if sessions.empty?
-    sessions.each { |s| lines.concat(session_rows(s, now)) }
+    lines << "#{cell(name)}  ·  #{short_path(dir)}  ·  #{count} running | font=HelveticaNeue-Bold sfimage=person.crop.circle sfcolor=\"#{MUTED}\""
+    lines.concat(usage_rows(readings[i], now, grid))
+    lines << "None running | sfimage=zzz color=\"#{MUTED}\" sfcolor=\"#{MUTED}\"" if sessions.empty?
+    sessions.each { |s| lines.concat(session_rows(s, now, grid)) }
     next if recent.empty?
 
     lines << "Recent headless (#{recent.size}) | sfimage=clock color=\"#{MUTED}\""
@@ -670,7 +702,7 @@ end
 def footer
   settings_warning
   puts '---'
-  puts 'Refresh | refresh=true'
+  puts 'Refresh | sfimage=arrow.clockwise refresh=true'
 end
 
 def render_empty
