@@ -18,6 +18,24 @@ separator: " — "         # between the section name and its summary
 #   QUIETBAR_SIZE_PATHS: ~/.npm:~/.cache     # mac-health: folders whose size it reports (colon-separated)
 #   SUPERVISOR_CONF: /opt/homebrew/etc/supervisord.conf   # only when you use supervisor
 
+# The separate Claude agents menu bar item (claude-agents.15s.rb) reads this
+# block; the wrapper ignores it. Everything is optional, the values shown are the
+# defaults. See README.md ("Claude agents").
+# claude_agents:
+#   terminal: Terminal        # what clicks open: Terminal or iTerm2
+#   icon: sparkles            # SF Symbol
+#   colors:
+#     busy: '#2da44e,#4ade80'   # light,dark
+#     idle: '#8e8e93,#98989d'
+#   agent_fresh_minutes: 30   # a sub-agent counts as running only if written to this recently
+#   recent_hours: 2           # headless runs that ended within this window are listed
+#   recent_max: 8             # ... at most this many per profile
+#   profiles:
+#     exclude: [.claude-old]            # folder names or paths to leave out
+#     include: [~/work/claude-config]   # extra folders, besides ~/.claude and ~/.claude-*
+#     names:                            # group labels, by folder name or path
+#       .claude: Personal
+
 sections:
   # Disk, memory, CPU, battery, Time Machine. The plugin colours its title amber
   # or red and puts the worst reading in it ("106G", "18%", "bkp 9d"); that

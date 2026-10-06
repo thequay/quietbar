@@ -1,12 +1,14 @@
 #!/bin/bash
 # install.sh: install quietbar and its bundled plugins for SwiftBar.
 #
-#   ./install.sh [--target DIR] [--force] [--no-fetch] [--no-prefs]
+#   ./install.sh [--target DIR] [--force] [--no-fetch] [--no-prefs] [--no-agents]
 #
 # Puts quietbar.1m.rb in SwiftBar's plugin folder and everything it wraps in a
 # hidden folder inside it (.quietbar/), which SwiftBar does not load, so only
-# quietbar shows in the menu bar. Writes ~/.config/quietbar/config.yml and
-# presets.yml if they don't exist. Never overwrites a file without --force.
+# quietbar shows in the menu bar. The one exception is claude-agents.15s.rb, a
+# menu bar item of its own that counts running Claude Code instances. Writes
+# ~/.config/quietbar/config.yml and presets.yml if they don't exist. Never
+# overwrites a file without --force.
 # Installs nothing else: it checks what is needed and tells you what is missing.
 #
 #   --target DIR   plugin folder to install into. Default: SwiftBar's current
@@ -15,6 +17,7 @@
 #                  files in ~/.config/quietbar are only ever created, never replaced).
 #   --no-fetch     don't download the Homebrew services plugin.
 #   --no-prefs     don't read or set SwiftBar's plugin folder preference.
+#   --no-agents    don't install the Claude agents menu bar item.
 
 set -u
 
@@ -28,7 +31,7 @@ upstream_commit=83c7fb10a2ab91f59e5f0b46bc887cac372accc3
 upstream_url="https://raw.githubusercontent.com/jimeh/dotfiles/$upstream_commit/xbar/brew-services.10m.rb"
 upstream_sha256=99ac66142af9d4b52b2af9f2a2d3045c7c7305f4a8e1c96effa27bd79d49e99f
 
-target= force=0 fetch=1 prefs=1
+target= force=0 fetch=1 prefs=1 agents=1
 while [[ $# -gt 0 ]]; do
   case $1 in
     --target) target=${2:-}; shift 2 || { echo "--target needs a folder" >&2; exit 64; } ;;
@@ -36,7 +39,8 @@ while [[ $# -gt 0 ]]; do
     --force) force=1; shift ;;
     --no-fetch) fetch=0; shift ;;
     --no-prefs) prefs=0; shift ;;
-    -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-agents) agents=0; shift ;;
+    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install.sh: unknown option $1 (try --help)" >&2; exit 64 ;;
   esac
 done
@@ -103,6 +107,7 @@ put() {
 }
 
 put "$here/quietbar.1m.rb" "$target/quietbar.1m.rb" 755
+[[ $agents == 1 ]] && put "$here/claude-agents.15s.rb" "$target/claude-agents.15s.rb" 755
 for f in "$here"/modules/*.rb; do put "$f" "$target/.quietbar/modules/$(basename "$f")" 755; done
 for f in "$here"/bin/*; do put "$f" "$target/.quietbar/bin/$(basename "$f")" 755; done
 for f in "$here"/lib/*.rb; do put "$f" "$target/.quietbar/lib/$(basename "$f")" 644; done
@@ -151,7 +156,8 @@ create "$here/presets.example.yml" "$config_dir/presets.yml"
 say ""
 others=()
 for f in "$target"/*; do
-  [[ -f $f && -x $f && $(basename "$f") != quietbar.1m.rb ]] && others+=("$(basename "$f")")
+  name=$(basename "$f")
+  [[ -f $f && -x $f && $name != quietbar.1m.rb && $name != claude-agents.15s.rb ]] && others+=("$name")
 done
 if [[ ${#others[@]} -gt 0 ]]; then
   say "SwiftBar also loads these files in $target, so they show up beside quietbar:"
@@ -187,6 +193,10 @@ say "    (nothing is edited for you):"
 say "      \"statusLine\": { \"type\": \"command\", \"command\": \"$target/.quietbar/bin/claude-usage.py --statusline\" }"
 say "    Until then the row says \"no reading\" and its menu repeats these steps."
 say "  - Settings live in $config_dir/config.yml (see README.md)."
+if [[ $agents == 1 ]]; then
+  say "  - Claude agents is its own menu bar item. Its first click on a session asks macOS for"
+  say "    permission to control your terminal (Terminal.app by default; iTerm2 is set in the config)."
+fi
 
 if [[ ${#missing[@]} -gt 0 ]]; then
   say ""

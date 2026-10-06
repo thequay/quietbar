@@ -4,7 +4,7 @@ One quiet SwiftBar menu bar item for your whole Mac.
 
 Disk, memory, services, ports, scheduled tasks, app presets and Claude usage each become one summary row, with their full menu one level down. The menu bar shows only an icon while everything is fine. When something needs attention, a short label appears next to the icon.
 
-This repo is the whole setup: the wrapper (`quietbar.1m.rb`), the plugins it wraps, the helper scripts they call, a ready-made config and an installer. The wrapper also works on its own, with any SwiftBar plugins, without changing them. See [Config](#config).
+This repo is the whole setup: the wrapper (`quietbar.1m.rb`), the plugins it wraps, one separate plugin for Claude agents (`claude-agents.15s.rb`), the helper scripts they call, a ready-made config and an installer. The wrapper also works on its own, with any SwiftBar plugins, without changing them. See [Config](#config).
 
 ## What it looks like
 
@@ -61,6 +61,7 @@ The icon and label turn red if any alert is critical, otherwise amber.
 | Tasks (`tasks`) | Scheduled tasks (launchd agents and cron): what runs when, what ran last, what is overdue or failed. Also a `task` command. | |
 | Loadout (`loadout`) | Presets for what runs: pick one and services, launchd jobs and apps start or stop to match. | |
 | Claude (`claude-usage`) | Claude plan usage, 5-hour and weekly. Alerts from 85%. | python3, one setting in Claude Code, see [Claude usage](#claude-usage) |
+| Claude agents (`claude-agents.15s.rb`), its own menu bar item | How many Claude Code instances are running, grouped by Claude profile. See [Claude agents](#claude-agents). | |
 | Git (`git-status`), off by default | Dirty, unpushed and stashed repos under your projects folder. | git |
 | Dev (`dev-processes`), off by default | Running dev processes (node first) and launchd jobs, with a stop button. | |
 
@@ -79,14 +80,14 @@ cd quietbar
 
 What it does:
 
-- Copies `quietbar.1m.rb` into SwiftBar's current plugin folder (or `~/SwiftBar/Plugins` if none is set) and everything it wraps into a hidden `.quietbar/` folder inside it. SwiftBar does not load hidden folders, so only quietbar shows in the menu bar and you switch nothing off by hand.
+- Copies `quietbar.1m.rb` into SwiftBar's current plugin folder (or `~/SwiftBar/Plugins` if none is set) and everything it wraps into a hidden `.quietbar/` folder inside it. SwiftBar does not load hidden folders, so the wrapped plugins stay out of the menu bar and you switch nothing off by hand. `claude-agents.15s.rb` goes next to quietbar as a second menu bar item, since it is not part of the wrapper; `--no-agents` leaves it out.
 - Makes the scripts executable.
 - Writes `~/.config/quietbar/config.yml` and `~/.config/quietbar/presets.yml` if they don't exist.
 - Downloads the Homebrew services plugin and patches it (see [Third-party code](#third-party-code)).
 - Sets SwiftBar's plugin folder only when none is set. If SwiftBar already uses another folder, it says so and what to do (point SwiftBar at the target, or use `--target`).
 - Never overwrites a file without `--force`. It lists the ones it kept.
 
-Options: `--target DIR`, `--force`, `--no-fetch` (skip the download), `--no-prefs` (leave SwiftBar's preferences alone). To update, `git pull` and run `./install.sh --force`; your config and presets are never touched.
+Options: `--target DIR`, `--force`, `--no-fetch` (skip the download), `--no-prefs` (leave SwiftBar's preferences alone), `--no-agents` (skip the Claude agents item). To update, `git pull` and run `./install.sh --force`; your config and presets are never touched.
 
 If the plugin folder already holds other plugins, they keep showing beside quietbar. The installer lists them. Move them out or switch them off in SwiftBar.
 
@@ -99,6 +100,51 @@ Claude Code tells its status line how much of the plan is used. `claude-usage.py
 ```
 
 Already have a status line? Call this script from yours and ignore its output. Until the first Claude response after that, the row says "no reading" and its menu says what to do. The cache is `~/.cache/claude-usage/usage.json`.
+
+## Claude agents
+
+A menu bar item of its own, `claude-agents.15s.rb` (SwiftBar takes the 15 second refresh from the file name). It shows the number of Claude Code instances that are working right now, or `0` in grey. The dropdown has one group per Claude profile, with one row per open session and its running sub-agents indented below:
+
+```
+sparkles 2
+---
+2 active · 3 open · 2 interactive · 1 headless · 1 sub-agents
+---
+Default · ~/.claude · 2 running
+api-refactor  ·  ~/code/api  ·  interactive  ·  opus 5.5  ·  138k ctx  ·  busy  ·  1h12m
+  Explore  ·  sonnet 5.5  ·  41k ctx  ·  Find the retry logic  ·  4m
+Work · ~/.claude-work · 0 running
+None running
+```
+
+Clicking a session focuses its terminal tab. Clicking a headless run (`claude -p`) or a sub-agent opens a read-only follower of its transcript in a new tab. Under "Recent headless" in each group, clicking a finished run resumes it in a new tab. Holding Option shows pid, tty and session id under each row.
+
+**How profiles are found.** The plugin looks in your home folder for `~/.claude`, every `~/.claude-*` folder and the folder in `CLAUDE_CONFIG_DIR` if set, and keeps those that hold a `sessions/` or `projects/` folder. Each becomes one group, so a Mac with one Claude setup shows one group, and none shows "No Claude setups found". The label comes from the folder name: `.claude` is "Default", `.claude-work` is "Work", `.claude-my-work` is "My Work".
+
+**What counts.** A session is a `sessions/<pid>.json` whose process is still alive and still a `claude` process. A sub-agent is running when its parent session is alive, its transcript was written within the freshness window and the parent transcript holds no finish notice for it. The plugin only reads; nothing in the profiles is changed. The context figure is the last message's token count. A percentage is added only for models whose name carries `[1m]` (a 1M window), because the transcripts don't record the window size.
+
+**Terminal.** Clicks drive Terminal.app (the default) or iTerm2 with AppleScript; the first click makes macOS ask for permission to control it. For any other terminal, a click shows a notification saying so, since there is no portable way to focus or open a tab there. If a session runs inside tmux, its pane is selected whichever terminal you use.
+
+Settings go in the `claude_agents` block of the quietbar config. All of it is optional and the values shown are the defaults:
+
+```yaml
+claude_agents:
+  terminal: Terminal          # Terminal or iTerm2
+  icon: sparkles              # SF Symbol
+  colors:
+    busy: '#2da44e,#4ade80'   # light,dark
+    idle: '#8e8e93,#98989d'
+  agent_fresh_minutes: 30     # a sub-agent counts as running only if written to this recently
+  recent_hours: 2             # headless runs that ended within this window are listed
+  recent_max: 8               # ... at most this many per profile
+  profiles:
+    exclude: [.claude-old]            # folder names or paths to leave out
+    include: [~/work/claude-config]   # extra folders; used even without sessions/ or projects/
+    names:                            # group labels, by folder name or path
+      .claude: Personal
+```
+
+The plugin reads `QUIETBAR_CONFIG` or `~/.config/quietbar/config.yml`; the wrapper ignores this block. A config that doesn't parse is ignored, with a note at the bottom of the menu. `claude-agents.15s.rb profiles` prints the profiles it found, one per line.
 
 ## Settings
 
