@@ -6,9 +6,11 @@
 # <xbar.desc>Counts running Claude Code instances (sessions, headless runs, sub-agents) across every Claude setup found on this Mac</xbar.desc>
 # <xbar.dependencies>ruby</xbar.dependencies>
 #
-# Menu bar: an icon and the number of live instances. Dropdown: plan usage per
-# profile, then one group per Claude profile with one row per session and its
-# running sub-agents indented below. This is the AI half of the bar, its own
+# Menu bar: an icon and the number of live instances. Dropdown: one group per
+# Claude profile, headed by its plan usage (a bar each for the 5-hour and weekly
+# windows, and one for how much of the week has gone), then one row per session
+# with its running sub-agents indented below. Rows are monospace so the bars,
+# numbers and session columns line up. This is the AI half of the bar, its own
 # menu bar item next to quietbar's Mac item; install.sh puts it next to
 # quietbar.1m.rb.
 #
@@ -37,10 +39,9 @@
 #   (<prefix>/usage.json for ~/.claude, <prefix>-<name>/usage.json for the
 #   others; see the README). Only that cache is read, never an API, so the 15
 #   second refresh costs nothing. A reading whose window has ended is shown as
-#   "reset since", and the bar title uses only readings under 15 minutes old.
-#   A profile without a reading
-#   (no status line set up, or an API-key setup that reports no limits) shows
-#   "no usage data".
+#   an empty bar marked "reset since", and the bar title uses only readings
+#   under 15 minutes old. A profile without a reading (no status line set up,
+#   or an API-key setup that reports no limits) shows "no data".
 # - Context: last assistant message's input + cache read + cache creation
 #   tokens. A percentage appears only when the model name carries "[1m]" (the
 #   transcripts don't record the window).
@@ -413,8 +414,10 @@ end
 
 # ---------- usage ----------
 
-USAGE_WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'week']].freeze
+USAGE_WINDOWS = [['five_hour', '5-hour'], ['seven_day', 'Week']].freeze
 WEEK = 7 * 24 * 3600
+BAR_WIDTH = 20
+ON_PACE = 5 # points of use vs time gone within which the week counts as on pace
 
 # The account name a profile folder gets in the usage cache: "main" for ~/.claude, else the folder
 # name without the leading "." and "claude-" (~/.claude-work is "work"). The same rule as
@@ -493,30 +496,62 @@ def ago(seconds)
   "#{seconds / 60}m"
 end
 
-def reset_text(at, now)
-  clock = at.strftime(at.to_date == now.to_date ? '%H:%M' : '%a %H:%M')
-  "resets #{clock} (in #{left(at - now)})"
+# The same bar as the Mac item's Disk and Memory rows (modules/mac-health.1m.rb). Copied rather
+# than required so this plugin keeps working on its own, without lib/ or modules/.
+def bar(pct, width = BAR_WIDTH)
+  filled = (pct / 100.0 * width).round.clamp(0, width)
+  ('█' * filled) + ('░' * (width - filled))
 end
 
-def usage_rows(label, data, now)
+# One monospace row, so labels, bars and numbers line up down the menu.
+def mono_row(text, color = nil, extra = nil)
+  ["#{cell(text)} | font=Menlo", color && "color=\"#{color}\"", extra].compact.join(' ')
+end
+
+def usage_line(label, bar_text, pct_text, note)
+  "#{label.ljust(6)} #{bar_text}  #{pct_text.rjust(4)}  #{note}".rstrip
+end
+
+# Use against time gone: "38 pts under pace" is capacity that is lost at the reset.
+# A stale reading only says how much was used at least, so its note says "up to" and "at least".
+def pace_text(used, gone, stale)
+  gap = (used - gone).round
+  return 'on pace' if gap.abs <= ON_PACE && !stale
+
+  "#{stale ? (gap.negative? ? 'up to ' : 'at least ') : ''}#{gap.abs} pts #{gap.negative? ? 'under' : 'over'} pace"
+end
+
+# The rows of one profile's usage: a bar per window (5-hour, week), then how much of the week has
+# gone. Fresh readings are coloured by level, a reading older than 15 minutes is grey with its age,
+# a window that has ended shows an empty bar with what it last said.
+def usage_rows(data, now)
   windows = data ? USAGE_WINDOWS.map { |key, name| [key, name, usage_window(data, key, now)] }.reject { |*, w| w.nil? } : []
   if windows.empty?
-    return ["#{cell(label)}  ·  no usage data (an API-key setup, or the status line isn't set up) | sfimage=gauge color=\"#{MUTED}\"",
-            "#{cell(label)}  ·  see \"Claude agents\" in the quietbar README | alternate=true color=\"#{MUTED}\""]
+    return [mono_row("#{'Usage'.ljust(6)} no data (an API-key setup, or the status line isn't set up)", MUTED),
+            "see \"Claude agents\" in the quietbar README | alternate=true color=\"#{MUTED}\""]
   end
   age = usage_age(data, now)
-  note = age && age > USAGE_STALE ? "as of #{ago(age)} ago" : nil
-  windows.map do |key, name, w|
+  stale = age && age > USAGE_STALE
+  rows = []
+  windows.each do |key, name, w|
     if w[:over]
       # The reading's window has ended, so its percentage says nothing about the new one.
-      parts = [cell(label), "#{name} reset since", ["last seen #{w[:pct].round}%", age && "#{ago(age)} ago"].compact.join(' ')]
-      next "#{parts.join('  ·  ')} | sfimage=gauge color=\"#{MUTED}\""
+      note = ['reset since', "last seen #{w[:pct].round}%", age && "#{ago(age)} ago"].compact.join(' · ')
+      rows << mono_row(usage_line(name, bar(0), '–', note), MUTED)
+      next
     end
-    parts = [cell(label), "#{name} #{w[:pct].round}%", reset_text(w[:at], now)]
-    parts << "#{(100.0 * (now - (w[:at] - WEEK)) / WEEK).clamp(0, 100).round}% of week gone" if key == 'seven_day'
-    parts << note if note
-    "#{parts.join('  ·  ')} | sfimage=gauge sfcolor=\"#{usage_tint(w[:pct])}\""
+    color = stale ? MUTED : usage_tint(w[:pct])
+    clock = w[:at].strftime(w[:at].to_date == now.to_date ? '%H:%M' : '%a %H:%M')
+    note = ["resets #{clock}", "in #{left(w[:at] - now)}", stale ? "as of #{ago(age)} ago" : nil].compact.join(' · ')
+    rows << mono_row(usage_line(name, bar(w[:pct]), format('%d%%', w[:pct].round), note), color)
+    next unless key == 'seven_day'
+
+    gone = (100.0 * (now - (w[:at] - WEEK)) / WEEK).clamp(0, 100)
+    gap = w[:pct] - gone
+    pace_color = stale || gap.abs <= ON_PACE ? MUTED : (gap > 0 ? AMBER : nil)
+    rows << mono_row(usage_line('  time', bar(gone), format('%d%%', gone.round), pace_text(w[:pct], gone, stale)), pace_color)
   end
+  rows
 end
 
 # The highest 5-hour percentage across the profiles whose reading is fresh and whose window is
@@ -556,28 +591,31 @@ def action(*params)
   (parts + ['terminal=false']).join(' ')
 end
 
+# Session and sub-agent rows share one set of columns: status, name, model, context, age.
+def session_line(status, label, model, ctx, age)
+  [status.to_s.ljust(4), clip(label, 34).ljust(34), model.to_s.ljust(10), ctx.to_s.ljust(14), age.to_s.rjust(6)].join('  ')
+end
+
 def session_rows(s, now)
   busy = s[:status].to_s == 'busy'
   label = s[:headless] ? (s[:task] || s[:name]) : (s[:name] || s[:task] || "pid #{s[:pid]}")
-  parts = [clip(label, 46), short_path(s[:cwd]), s[:headless] ? 'headless' : 'interactive',
-           pretty_model(s[:model]), ctx_text(s[:model], s[:ctx], s[:cmd]), s[:status], span(now - s[:started])]
   click = if s[:headless]
             s[:path] ? action('follow', s[:path], s[:pid]) : nil
           else
             action('focus', s[:pid])
           end
   icon = s[:headless] ? 'bolt.fill' : 'terminal'
-  color = busy ? GREEN : MUTED
-  row = "#{cell(parts.join('  ·  '))} | sfimage=#{icon} sfcolor=\"#{color}\""
+  line = session_line(s[:status], label, pretty_model(s[:model]), ctx_text(s[:model], s[:ctx], s[:cmd]), span(now - s[:started]))
+  row = mono_row(line, busy ? nil : MUTED, "sfimage=#{icon} sfcolor=\"#{busy ? GREEN : MUTED}\"")
   row += " #{click}" if click
-  detail = ["pid #{s[:pid]}", s[:tty] == '??' ? 'no tty' : s[:tty], "session #{s[:sid][0, 8]}", s[:cwd]]
+  detail = [s[:headless] ? 'headless' : 'interactive', short_path(s[:cwd]), "pid #{s[:pid]}", s[:tty] == '??' ? 'no tty' : s[:tty],
+            "session #{s[:sid][0, 8]}"]
   detail << "task: #{clip(s[:task], 80)}" if s[:task] && !s[:headless]
   rows = [row, "#{cell(detail.compact.join('  ·  '))} | alternate=true color=\"#{MUTED}\""]
   s[:agents].each do |a|
-    ap = [a[:type], pretty_model(a[:model]), ctx_text(a[:model], a[:ctx]), clip(a[:desc] || 'no description', 50),
-          span(now - a[:started])]
-    rows << "#{cell("\u2003\u2003#{ap.join('  ·  ')}")} | sfimage=arrow.turn.down.right sfcolor=\"#{GREEN}\" " \
-            "#{action('follow', a[:path], 0)}"
+    line = session_line('', "  #{a[:type]}: #{a[:desc] || 'no description'}", pretty_model(a[:model]), ctx_text(a[:model], a[:ctx]),
+                        span(now - a[:started]))
+    rows << "#{mono_row(line, nil, "sfimage=arrow.turn.down.right sfcolor=\"#{GREEN}\"")} #{action('follow', a[:path], 0)}"
   end
   rows
 end
@@ -608,12 +646,12 @@ def render
   nagent = groups.sum { |g| g[2].sum { |s| s[:agents].size } }
   puts "#{active} active · #{total} open · #{nsess} interactive · #{nhead} headless · #{nagent} sub-agents | color=\"#{MUTED}\""
 
-  lines = ['---', "Plan usage | color=\"#{MUTED}\""]
-  groups.each_with_index { |(name, _, _, _), i| lines.concat(usage_rows(name, readings[i], now)) }
-  groups.each do |name, dir, sessions, recent|
+  lines = []
+  groups.each_with_index do |(name, dir, sessions, recent), i|
     lines << '---'
     count = sessions.sum { |s| 1 + s[:agents].size }
-    lines << "#{cell(name)} · #{short_path(dir)} · #{count} running | color=\"#{MUTED}\""
+    lines << "#{cell(name)}  ·  #{short_path(dir)}  ·  #{count} running | font=HelveticaNeue-Bold"
+    lines.concat(usage_rows(readings[i], now))
     lines << "None running | color=\"#{MUTED}\"" if sessions.empty?
     sessions.each { |s| lines.concat(session_rows(s, now)) }
     next if recent.empty?

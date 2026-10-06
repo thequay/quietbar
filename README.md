@@ -93,26 +93,31 @@ If the plugin folder already holds other plugins, they keep showing beside quiet
 
 ## Claude agents
 
-The AI item, `claude-agents.15s.rb` (SwiftBar takes the 15 second refresh from the file name). It shows the number of Claude Code instances that are working right now, or `0` in grey. With `title: count_usage` (see below) the highest 5-hour plan usage follows the count, as `3 · 7%`. The dropdown opens with the plan usage of each profile, then has one group per Claude profile, with one row per open session and its running sub-agents indented below:
+The AI item, `claude-agents.15s.rb` (SwiftBar takes the 15 second refresh from the file name). It shows the number of Claude Code instances that are working right now, or `0` in grey. With `title: count_usage` (see below) the highest 5-hour plan usage follows the count, as `3 · 7%`. The dropdown has one group per Claude profile, separated by lines. Each group starts with that profile's plan usage, drawn with the same bars as the Mac item, then has one row per open session with its running sub-agents indented below. Rows are monospace, so bars, numbers and columns line up:
 
 ```
 sparkles 2          (title: count_usage shows "2 · 7%")
 ---
 2 active · 3 open · 2 interactive · 1 headless · 1 sub-agents
 ---
-Plan usage
-Default  ·  5-hour 7%  ·  resets 18:00 (in 2h 55m)
-Default  ·  week 14%  ·  resets Sun 10:00 (in 4d 21h)  ·  30% of week gone
-Work  ·  no usage data (an API-key setup, or the status line isn't set up)
+Default  ·  ~/.claude  ·  3 running
+5-hour ██░░░░░░░░░░░░░░░░░░    8%  resets 17:00 · in 4h 05m
+Week   █████░░░░░░░░░░░░░░░   26%  resets Sun 10:00 · in 4d 21h
+  time ██████░░░░░░░░░░░░░░   30%  on pace
+idle  api-refactor                        opus 5.5    178k ctx         3h26m
+busy  docs-pass                           sonnet 5.5  119k ctx           35m
+        Explore: Find the retry logic     sonnet 5.5  72k ctx             2m
 ---
-Default · ~/.claude · 2 running
-api-refactor  ·  ~/code/api  ·  interactive  ·  opus 5.5  ·  138k ctx  ·  busy  ·  1h12m
-  Explore  ·  sonnet 5.5  ·  41k ctx  ·  Find the retry logic  ·  4m
-Work · ~/.claude-work · 0 running
+Work  ·  ~/.claude-work  ·  0 running
+5-hour ░░░░░░░░░░░░░░░░░░░░     –  reset since · last seen 0% · 14h ago
+Week   ██░░░░░░░░░░░░░░░░░░   12%  resets Fri 04:00 · in 2d 15h · as of 14h ago
+  time ████████████░░░░░░░░   62%  up to 50 pts under pace
 None running
 ```
 
-Clicking a session focuses its terminal tab. Clicking a headless run (`claude -p`) or a sub-agent opens a read-only follower of its transcript in a new tab. Under "Recent headless" in each group, clicking a finished run resumes it in a new tab. Holding Option shows pid, tty and session id under each row.
+The usage rows are the 5-hour and weekly windows, each with a bar, the percent used and when it resets. The `time` row under the week is how much of the week has gone, with a note comparing it to what you have used: "38 pts under pace" is capacity that is lost at the reset, "12 pts over pace" means the week is being used up early (the row turns amber), and within 5 points it says "on pace". Usage rows are green, amber from `amber_from` and red from `red_from`. A reading older than 15 minutes is grey and says "as of 14h ago" (its pace note says "up to" or "at least", since the use can only have grown). A window that has ended shows an empty bar and "reset since", with what it last said. A profile without a reading shows "Usage no data" in its group. In a session row, busy rows are in normal text with a green icon and idle rows are grey; the working folder, pid and session id are under each row while you hold Option.
+
+Clicking a session focuses its terminal tab. Clicking a headless run (`claude -p`) or a sub-agent opens a read-only follower of its transcript in a new tab. Under "Recent headless" in each group, clicking a finished run resumes it in a new tab. Holding Option shows folder, pid, tty and session id under each row.
 
 **How profiles are found.** The plugin looks in your home folder for `~/.claude`, every `~/.claude-*` folder and the folder in `CLAUDE_CONFIG_DIR` if set, and keeps those that hold a `sessions/` or `projects/` folder. Each becomes one group, so a Mac with one Claude setup shows one group, and none shows "No Claude setups found". The label comes from the folder name: `.claude` is "Default", `.claude-work` is "Work", `.claude-my-work` is "My Work".
 
@@ -124,7 +129,7 @@ Clicking a session focuses its terminal tab. Clicking a headless run (`claude -p
 "statusLine": { "type": "command", "command": "<plugin folder>/.quietbar/bin/claude-usage.py --statusline" }
 ```
 
-Already have a status line? Call this script from yours and ignore its output. Each profile gets its own reading, since each can be a different account: the script takes the profile from the session's transcript folder (else `CLAUDE_CONFIG_DIR`, else `~/.claude`) and writes `~/.cache/claude-usage/usage.json` for `~/.claude` and `~/.cache/claude-usage-<name>/usage.json` for the others, where `<name>` is the folder name without the leading `.` and `claude-` (`~/.claude-work` is `work`), plus an `account.json` there with the profile folder. `CLAUDE_USAGE_CACHE` changes the prefix `~/.cache/claude-usage`. This is the layout of the author's own, larger usage tool, so the two can share one cache. The AI item finds a profile's reading by that name, or by the `account.json` of any `<prefix>-*` folder that names the profile, so an odd folder name still works. A profile with no reading, such as one that has no status line set up, or an API-key setup, which reports no plan limits, shows "no usage data". A status line only records while a session in that profile is open, so an old reading is normal: rows older than 15 minutes say "as of 14h ago", a window whose reset time has passed shows "reset since, last seen 0% 14h ago" instead of its old percentage, and `title: count_usage` leaves out readings older than 15 minutes. Rows turn amber from 60% and red from 85%. Run `claude-usage.py` without arguments to see the readings.
+Already have a status line? Call this script from yours and ignore its output. Each profile gets its own reading, since each can be a different account: the script takes the profile from the session's transcript folder (else `CLAUDE_CONFIG_DIR`, else `~/.claude`) and writes `~/.cache/claude-usage/usage.json` for `~/.claude` and `~/.cache/claude-usage-<name>/usage.json` for the others, where `<name>` is the folder name without the leading `.` and `claude-` (`~/.claude-work` is `work`), plus an `account.json` there with the profile folder. `CLAUDE_USAGE_CACHE` changes the prefix `~/.cache/claude-usage`. This is the layout of the author's own, larger usage tool, so the two can share one cache. The AI item finds a profile's reading by that name, or by the `account.json` of any `<prefix>-*` folder that names the profile, so an odd folder name still works. A profile with no reading, such as one that has no status line set up, or an API-key setup, which reports no plan limits, shows "no usage data". A status line only records while a session in that profile is open, so an old reading is normal: rows older than 15 minutes say "as of 14h ago", a window whose reset time has passed shows an empty bar and "reset since · last seen 0% · 14h ago" instead of its old percentage, and `title: count_usage` leaves out readings older than 15 minutes. Rows turn amber from 60% and red from 85%. Run `claude-usage.py` without arguments to see the readings.
 
 **Terminal.** Clicks drive Terminal.app (the default) or iTerm2 with AppleScript; the first click makes macOS ask for permission to control it. For any other terminal, a click shows a notification saying so, since there is no portable way to focus or open a tab there. If a session runs inside tmux, its pane is selected whichever terminal you use.
 
