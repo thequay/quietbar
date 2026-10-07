@@ -570,6 +570,9 @@ module Tasks
       return false unless due
 
       since = task.wrapped? ? File.mtime(task.plist) : task.since
+      # A plist edited after the due time had another schedule then: a time
+      # moved to earlier today was not missed.
+      since = [since, File.mtime(task.plist)].max if since && task.plist && File.exist?(task.plist)
       return false if since.nil? || due <= since
 
       task.last_run.nil? || task.last_run < due
